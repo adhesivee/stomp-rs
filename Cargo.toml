@@ -6,6 +6,9 @@ edition = "2018"
 license = "MIT"
 repository = "https://github.com/adhesivee/stomp-rs"
 description = "STOMP client"
+keywords = [
+  "stomp"
+]
 
 exclude = [
   ".idea/",
