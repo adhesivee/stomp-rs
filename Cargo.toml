@@ -3,6 +3,9 @@ name = "stomp-rs"
 version = "0.0.1"
 authors = ["Albert <albert@myndocs.nl>"]
 edition = "2018"
+license = "MIT"
+repository = "https://github.com/adhesivee/stomp-rs"
+description = "STOMP client"
 
 exclude = [
   ".idea/",
