@@ -19,7 +19,7 @@ pub enum ClientCommand {
     Disconnect
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ServerCommand {
     Connected,
     Message,
@@ -96,7 +96,7 @@ impl Command for ServerCommand {
 impl Command for ClientCommand {
 
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Frame<T>
     where T: Into<&'static str> {
     pub(crate) command: T,
@@ -164,8 +164,8 @@ pub struct FrameParser<T: Command> {
     current_headers: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug)]
-pub enum StompMessage<T: Command> {
+#[derive(Debug, Clone)]
+pub enum StompMessage<T: Command + Clone> {
     Frame(Frame<T>),
     Ping,
 }
@@ -189,7 +189,7 @@ impl Error for ParseError {
 
 }
 
-impl <T: Command> FrameParser<T> {
+impl <T: Command + Clone> FrameParser<T> {
 
     pub fn new() -> FrameParser<T> {
         FrameParser {
