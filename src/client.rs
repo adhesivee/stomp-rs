@@ -8,14 +8,15 @@ use tokio::time::{Duration, Instant};
 use tokio::time::error::Elapsed;
 use tokio::sync::broadcast::error::RecvError;
 use std::fmt::{Display, Formatter};
+use uuid::Uuid;
 
 pub struct Client {
     connection: Connection,
-    sender: Sender<StompMessage<ServerCommand>>
+    sender: Sender<StompMessage<ServerCommand>>,
 }
 
 pub struct ClientBuilder {
-    host: String
+    host: String,
 }
 
 impl ClientBuilder {
@@ -37,9 +38,8 @@ impl Display for ClientError {
     }
 }
 
-impl Error for ClientError {
+impl Error for ClientError {}
 
-}
 impl Client {
     pub async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
@@ -47,9 +47,9 @@ impl Client {
         let client = Self {
             connection: Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
-                sender.clone()
+                sender.clone(),
             ).await,
-            sender: sender.clone()
+            sender: sender.clone(),
         };
 
         client.connection.emit(
@@ -60,8 +60,12 @@ impl Client {
     }
 
     pub async fn subscribe(&self, destination: String) -> Result<(), Box<dyn Error>> {
+        let subscriber_id = Uuid::new_v4();
+        let receipt_id = Uuid::new_v4();
+
         self.connection.emit(
-            Subscribe::new("".to_owned(), destination)
+            Subscribe::new(subscriber_id.to_string(), destination)
+                .receipt(receipt_id.to_string())
         ).await?;
 
         let mut receiver = self.sender
@@ -72,16 +76,19 @@ impl Client {
 
         loop {
             match tokio::time::timeout(Duration::from_millis(10), receiver.recv()).await {
-
-                Ok(Ok(StompMessage::Frame(val)))  => {
-                    if let ServerCommand::Receipt = val.command {
-                        // @TODO: Match receipt id
-                        return Ok(());
-                    } else {
-
+                Ok(Ok(StompMessage::Frame(val))) => {
+                    match val.command {
+                        ServerCommand::Receipt => {
+                            if val.headers.contains_key("receipt-id")  && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string(){
+                                println!("Receipt received!");
+                                return Ok(())
+                            }
+                        }
+                        ServerCommand::Error => {}
+                        _ => {}
                     }
                 }
-                Ok(val) => {}
+                Ok(_) => { /* ignore */}
                 Err(_) => {}
             }
 
