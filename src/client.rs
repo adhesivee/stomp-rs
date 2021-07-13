@@ -1,6 +1,6 @@
 use tokio::net::TcpStream;
 use crate::connection::Connection;
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::broadcast::{channel, Sender, Receiver};
 use crate::protocol::frame::{Connect, Subscribe};
 use std::error::Error;
 use crate::protocol::{StompMessage, ClientCommand, ServerCommand};
@@ -74,6 +74,16 @@ impl Client {
             .clone()
             .subscribe();
 
+        Self::process_receipt(&mut receiver, receipt_id.to_string(), destination.clone()).await?;
+
+        Ok(())
+    }
+
+    async fn process_receipt(
+        receiver: &mut Receiver<StompMessage<ServerCommand>>,
+        receipt_id: String,
+        destination: String
+    ) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
 
         loop {
