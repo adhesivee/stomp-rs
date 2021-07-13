@@ -29,7 +29,9 @@ impl ClientBuilder {
 
 #[derive(Debug)]
 pub enum ClientError {
-    ReceiptTimeout(String)
+    ReceiptTimeout(String),
+    Nack(String),
+    ConnectionError(Box<dyn Error>)
 }
 
 impl Display for ClientError {
@@ -64,7 +66,7 @@ impl Client {
         let receipt_id = Uuid::new_v4();
 
         self.connection.emit(
-            Subscribe::new(subscriber_id.to_string(), destination)
+            Subscribe::new(subscriber_id.to_string(), destination.clone())
                 .receipt(receipt_id.to_string())
         ).await?;
 
@@ -80,16 +82,22 @@ impl Client {
                     match val.command {
                         ServerCommand::Receipt => {
                             if val.headers.contains_key("receipt-id")  && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string(){
-                                println!("Receipt received!");
                                 return Ok(())
                             }
                         }
-                        ServerCommand::Error => {}
-                        _ => {}
+                        ServerCommand::Error => {
+                            if val.headers.contains_key("receipt-id")  && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string(){
+                                return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))))
+                            }
+                        }
+                        _ => { /* non-relevant frame */ }
                     }
                 }
-                Ok(_) => { /* ignore */}
-                Err(_) => {}
+                Ok(Err(cause)) => {
+                    return Err(Box::new(ClientError::ConnectionError(Box::new(cause))));
+                }
+                Ok(_) => { /* ignore, message not relevant for this process */}
+                Err(_) => { /* elapsed time check done later */}
             }
 
             if start.elapsed().as_millis() > 2000 {
