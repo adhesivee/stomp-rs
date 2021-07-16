@@ -1,17 +1,18 @@
 use tokio::net::TcpStream;
 use crate::connection::Connection;
 use tokio::sync::broadcast::{channel, Sender, Receiver};
-use crate::protocol::frame::{Connect, Subscribe};
+use crate::protocol::frame::{Connect, Subscribe, Unsubscribe, Send};
 use std::error::Error;
-use crate::protocol::{StompMessage, ClientCommand, ServerCommand};
+use crate::protocol::{StompMessage, ClientCommand, ServerCommand, Frame};
 use tokio::time::{Duration, Instant};
 use tokio::time::error::Elapsed;
 use tokio::sync::broadcast::error::RecvError;
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
+use std::sync::Arc;
 
 pub struct Client {
-    connection: Connection,
+    connection: Arc<Connection>,
     sender: Sender<StompMessage<ServerCommand>>,
 }
 
@@ -31,7 +32,7 @@ impl ClientBuilder {
 pub enum ClientError {
     ReceiptTimeout(String),
     Nack(String),
-    ConnectionError(Box<dyn Error>)
+    ConnectionError(Box<dyn Error>),
 }
 
 impl Display for ClientError {
@@ -47,10 +48,10 @@ impl Client {
         let (sender, mut receiver) = channel(5);
 
         let client = Self {
-            connection: Connection::new(
+            connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
                 sender.clone(),
-            ).await,
+            ).await),
             sender: sender.clone(),
         };
 
@@ -61,7 +62,7 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn subscribe(&self, destination: String) -> Result<(), Box<dyn Error>> {
+    pub async fn subscribe(&self, destination: String, sender: tokio::sync::mpsc::Sender<Frame<ServerCommand>>) -> Result<(), Box<dyn Error>> {
         let subscriber_id = Uuid::new_v4();
         let receipt_id = Uuid::new_v4();
 
@@ -76,13 +77,55 @@ impl Client {
 
         Self::process_receipt(&mut receiver, receipt_id.to_string(), destination.clone()).await?;
 
+        let mut sub_sender = self.sender.clone();
+        let mut sub_connection = Arc::clone(&self.connection);
+        tokio::spawn(async move {
+            let mut sub_recv = sub_sender.subscribe();
+
+            while let Ok(message) = sub_recv.recv().await {
+                if let StompMessage::Frame(frame) = message {
+                    let subscription_header = frame.headers.get("subscription");
+                    let destination_header = frame.headers.get("destination");
+
+                    if subscription_header.is_some() && subscription_header.unwrap() == &subscriber_id.to_string() &&
+                        destination_header.is_some() && destination_header.unwrap() == &destination {
+                        if sender.send(frame).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+
+                sub_connection.emit(
+                    Unsubscribe::new(subscriber_id.to_string())
+                );
+            }
+        });
+        Ok(())
+    }
+
+    pub async fn send(&self, destination: String, message: String) -> Result<(), Box<dyn Error>> {
+        let receipt_id = Uuid::new_v4();
+
+        self.connection.emit(
+            Send::new(destination.clone())
+                .receipt(receipt_id.to_string())
+                .body(message)
+        ).await?;
+
+        let mut receiver = self.sender
+            .clone()
+            .subscribe();
+
+        Self::process_receipt(&mut receiver, receipt_id.to_string(), destination)
+            .await?;
+
         Ok(())
     }
 
     async fn process_receipt(
         receiver: &mut Receiver<StompMessage<ServerCommand>>,
         receipt_id: String,
-        destination: String
+        destination: String,
     ) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
 
@@ -91,13 +134,13 @@ impl Client {
                 Ok(Ok(StompMessage::Frame(val))) => {
                     match val.command {
                         ServerCommand::Receipt => {
-                            if val.headers.contains_key("receipt-id")  && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string(){
-                                return Ok(())
+                            if val.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string() {
+                                return Ok(());
                             }
                         }
                         ServerCommand::Error => {
-                            if val.headers.contains_key("receipt-id")  && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string(){
-                                return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))))
+                            if val.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.to_string() {
+                                return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
                             }
                         }
                         _ => { /* non-relevant frame */ }
@@ -106,8 +149,8 @@ impl Client {
                 Ok(Err(cause)) => {
                     return Err(Box::new(ClientError::ConnectionError(Box::new(cause))));
                 }
-                Ok(_) => { /* ignore, message not relevant for this process */}
-                Err(_) => { /* elapsed time check done later */}
+                Ok(_) => { /* ignore, message not relevant for this process */ }
+                Err(_) => { /* elapsed time check done later */ }
             }
 
             if start.elapsed().as_millis() > 2000 {

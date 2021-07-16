@@ -125,6 +125,10 @@ impl Send {
         self
     }
 
+    pub fn receipt(mut self, receipt_id: String) -> Self {
+        self.header("receipt".to_string(), receipt_id)
+    }
+
     pub fn header(mut self, key: String, value: String) -> Self {
         self.headers.insert(key, value);
 
@@ -172,6 +176,42 @@ impl Into<Frame<ClientCommand>> for Subscribe {
     fn into(self) -> Frame<ClientCommand> {
         Frame {
             command: ClientCommand::Subscribe,
+            headers: self.headers,
+            body: "".to_string()
+        }
+    }
+}
+
+
+pub struct Unsubscribe {
+    headers: HashMap<String, String>
+}
+
+impl Unsubscribe {
+    pub fn new(id: String) -> Self {
+        let mut headers = HashMap::new();
+        headers.insert("id".to_string(), id);
+
+        Self {
+            headers
+        }
+    }
+
+    pub fn receipt(mut self, receipt_id: String) -> Self {
+        self.header("receipt".to_string(), receipt_id)
+    }
+
+    pub fn header(mut self, key: String, value: String) -> Self {
+        self.headers.insert(key, value);
+
+        self
+    }
+}
+
+impl Into<Frame<ClientCommand>> for Unsubscribe {
+    fn into(self) -> Frame<ClientCommand> {
+        Frame {
+            command: ClientCommand::Unsubscribe,
             headers: self.headers,
             body: "".to_string()
         }

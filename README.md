@@ -10,6 +10,18 @@ let client = Client::connect(
 
 Subscribing:
 ```rust
-client.subscribe("/topic/test".to_string())
+let (tx, mut rx) = channel();
+
+client.subscribe("/topic/test".to_string(), tx)
+    .await?;
+
+if let Some(frame) = rx.recv().await {
+    println!("Frame received: {}", frame.body);
+}
+```
+
+Sending:
+```rust
+client.send("/topic/test".to_string(), "test-message".to_string())
     .await?;
 ```
