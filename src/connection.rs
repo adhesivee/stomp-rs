@@ -1,7 +1,6 @@
 use crate::protocol::{FrameParser, ServerCommand, StompMessage, ClientCommand, Frame};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::net::TcpStream;
-use crate::protocol::frame::Connect;
 use tokio::sync::mpsc::error::SendError;
 use tokio::io::{ErrorKind, AsyncWriteExt};
 use crate::protocol::BNF_LF;
@@ -33,7 +32,7 @@ impl Connection {
                                 StompMessage::Ping => tcp_stream.write_u8(BNF_LF).await.unwrap()
                             }
 
-                            tcp_stream.flush();
+                            tcp_stream.flush().await.unwrap();
                         }
 
                     },
@@ -50,7 +49,7 @@ impl Connection {
                             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
 
                             }
-                            Err(e) => {
+                            Err(_e) => {
                                 // @TODO
                                 // return Err(e.into());
                             }

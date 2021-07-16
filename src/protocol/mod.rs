@@ -29,7 +29,7 @@ pub enum ServerCommand {
 
 impl From<ServerCommand> for &str {
     fn from(value: ServerCommand) -> Self {
-        return match value {
+        match value {
             ServerCommand::Connected => "CONNECTED",
             ServerCommand::Message => "MESSAGE",
             ServerCommand::Receipt => "RECEIPT",
@@ -40,7 +40,7 @@ impl From<ServerCommand> for &str {
 
 impl From<ClientCommand> for &str {
     fn from(value: ClientCommand) -> Self {
-        return match value {
+        match value {
             ClientCommand::Connect => "CONNECT",
             ClientCommand::Send => "SEND",
             ClientCommand::Subscribe => "SUBSCRIBE",
@@ -59,7 +59,7 @@ impl TryFrom<&str> for ClientCommand {
     type Error = &'static str;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        return match value {
+        match value {
             "CONNECT" => Ok(ClientCommand::Connect),
             "SEND" => Ok(ClientCommand::Send),
             "SUBSCRIBE" => Ok(ClientCommand::Subscribe),
@@ -79,7 +79,7 @@ impl TryFrom<&str> for ServerCommand {
     type Error = &'static str;
 
     fn try_from(value: &str) -> Result<Self, <ServerCommand as TryFrom<&'static str>>::Error> {
-        return match value {
+        match value {
             "CONNECTED" => Ok(ServerCommand::Connected),
             "MESSAGE" => Ok(ServerCommand::Message),
             "RECEIPT" => Ok(ServerCommand::Receipt),
@@ -125,7 +125,7 @@ impl <T> Frame<T>
         buffer.extend_from_slice(self.body.as_bytes());
         buffer.push(BNF_NULL);
 
-        return buffer;
+        buffer
     }
 }
 
@@ -236,10 +236,10 @@ impl <T: Command + Clone> FrameParser<T> {
                             self.buffer.clear();
                         } else {
                             let header_line = String::from_utf8(self.buffer.clone()).unwrap();
-                            let mut header = header_line.split(":");
+                            let mut header = header_line.split(':');
                             self.current_headers.as_mut()
                                 .unwrap()
-                                .insert(header.nth(0).unwrap().trim().to_string(), header.nth(0).unwrap().trim().to_string());
+                                .insert(header.next().unwrap().trim().to_string(), header.next().unwrap().trim().to_string());
                             self.allowed_read = &DEFAULT_ALLOWED_READ;
                             self.buffer.clear();
                         }

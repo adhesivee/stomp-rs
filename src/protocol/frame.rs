@@ -1,6 +1,5 @@
 use crate::protocol::{Frame, ClientCommand};
 use std::collections::HashMap;
-use crate::client::Client;
 
 pub struct Nack {
     headers: HashMap<String, String>
@@ -16,7 +15,7 @@ impl Nack {
         }
     }
 
-    pub fn transaction(mut self, tx_id: String) -> Self {
+    pub fn transaction(self, tx_id: String) -> Self {
         self.header("transaction".to_string(), tx_id)
     }
 
@@ -51,7 +50,7 @@ impl Ack {
         }
     }
 
-    pub fn transaction(mut self, tx_id: String) -> Self {
+    pub fn transaction(self, tx_id: String) -> Self {
         self.header("transaction".to_string(), tx_id)
     }
 
@@ -79,13 +78,13 @@ pub struct Connect {
 impl Connect {
     pub fn new(accept_version: String, host: String) -> Self {
         let mut headers = HashMap::new();
-        headers.insert("accept-version".to_string(), accept_version.to_string());
-        headers.insert("host".to_string(), host.to_string());
+        headers.insert("accept-version".to_string(), accept_version);
+        headers.insert("host".to_string(), host);
 
         Connect { headers }
     }
 
-    pub fn heartbeat(mut self, client_interval: u32, server_interval: u32) -> Self {
+    pub fn heartbeat(self, client_interval: u32, server_interval: u32) -> Self {
         self.header("heart-beat".to_string(), format!("{},{}", client_interval, server_interval))
     }
 
@@ -125,7 +124,7 @@ impl Send {
         self
     }
 
-    pub fn receipt(mut self, receipt_id: String) -> Self {
+    pub fn receipt(self, receipt_id: String) -> Self {
         self.header("receipt".to_string(), receipt_id)
     }
 
@@ -161,7 +160,7 @@ impl Subscribe {
         }
     }
 
-    pub fn receipt(mut self, receipt_id: String) -> Self {
+    pub fn receipt(self, receipt_id: String) -> Self {
         self.header("receipt".to_string(), receipt_id)
     }
 
@@ -197,7 +196,7 @@ impl Unsubscribe {
         }
     }
 
-    pub fn receipt(mut self, receipt_id: String) -> Self {
+    pub fn receipt(self, receipt_id: String) -> Self {
         self.header("receipt".to_string(), receipt_id)
     }
 
