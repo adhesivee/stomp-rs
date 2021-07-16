@@ -102,11 +102,11 @@ impl Client {
                         break;
                     }
                 }
-
-                sub_connection.emit(
-                    Unsubscribe::new(subscriber_id.to_string())
-                ).await.unwrap();
             }
+
+            sub_connection.emit(
+                Unsubscribe::new(subscriber_id.to_string())
+            ).await.unwrap();
         });
         Ok(())
     }
