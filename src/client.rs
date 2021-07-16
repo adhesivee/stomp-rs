@@ -62,14 +62,24 @@ impl Client {
         Ok(client)
     }
 
-    pub async fn subscribe(&self, destination: String, sender: tokio::sync::mpsc::Sender<Frame<ServerCommand>>) -> Result<(), Box<dyn Error>> {
+    pub async fn subscribe(
+        &self,
+        destination: String,
+        headers: Option<&[(&str, &str)]>,
+        sender: tokio::sync::mpsc::Sender<Frame<ServerCommand>>
+    ) -> Result<(), Box<dyn Error>> {
         let subscriber_id = Uuid::new_v4();
         let receipt_id = Uuid::new_v4();
 
-        self.connection.emit(
-            Subscribe::new(subscriber_id.to_string(), destination.clone())
-                .receipt(receipt_id.to_string())
-        ).await?;
+        let subscribe = headers.unwrap_or_else(|| &[])
+            .iter()
+            .fold(
+                Subscribe::new(subscriber_id.to_string(), destination.clone()),
+                |left, right| left.header(right.0.to_string(), right.1.to_string())
+            )
+            .receipt(receipt_id.to_string());
+
+        self.connection.emit(subscribe).await?;
 
         let mut receiver = self.sender
             .clone()

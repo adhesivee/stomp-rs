@@ -12,7 +12,7 @@ Subscribing:
 ```rust
 let (tx, mut rx) = channel();
 
-client.subscribe("/topic/test".to_string(), tx)
+client.subscribe("/topic/test".to_string(), None, tx)
     .await?;
 
 if let Some(frame) = rx.recv().await {
