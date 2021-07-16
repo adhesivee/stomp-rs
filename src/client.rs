@@ -75,7 +75,7 @@ impl Client {
             .iter()
             .fold(
                 Subscribe::new(subscriber_id.to_string(), destination.clone()),
-                |left, right| left.header(right.0.to_string(), right.1.to_string())
+                |subscribe, header| subscribe.header(header.0.to_string(), header.1.to_string())
             )
             .receipt(receipt_id.to_string());
 
