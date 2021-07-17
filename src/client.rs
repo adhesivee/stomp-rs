@@ -19,7 +19,7 @@ pub struct Client {
     connection: Arc<Connection>,
     sender: ServerStompSender,
     pending_receipts: Arc<Mutex<HashMap<ReceiptId, ServerStompSender>>>,
-    subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>
+    subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
 }
 
 pub struct ClientBuilder {
@@ -60,7 +60,7 @@ impl Client {
             ).await),
             sender,
             pending_receipts: Arc::new(Default::default()),
-            subscribers: Arc::new(Default::default())
+            subscribers: Arc::new(Default::default()),
         };
 
         let subscribers = Arc::clone(&client.subscribers);
@@ -132,11 +132,9 @@ impl Client {
 
             while let Some(message) = sub_recv.recv().await {
                 if let StompMessage::Frame(frame) = message {
-                    let subscription_header = frame.headers.get("subscription");
                     let destination_header = frame.headers.get("destination");
 
-                    if subscription_header.is_some() && subscription_header.unwrap() == &subscriber_id.to_string() &&
-                        destination_header.is_some() && destination_header.unwrap() == &destination &&
+                    if destination_header.is_some() && destination_header.unwrap() == &destination &&
                         sender.send(frame).await.is_err()
                     {
                         break;
@@ -184,14 +182,10 @@ impl Client {
                 Ok(Some(StompMessage::Frame(val))) => {
                     match val.command {
                         ServerCommand::Receipt => {
-                            if val.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
-                                return Ok(());
-                            }
+                            return Ok(());
                         }
                         ServerCommand::Error => {
-                            if val.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
-                                return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
-                            }
+                            return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
                         }
                         _ => { /* non-relevant frame */ }
                     }
