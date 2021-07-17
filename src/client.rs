@@ -1,6 +1,6 @@
 use tokio::net::TcpStream;
 use crate::connection::Connection;
-use tokio::sync::broadcast::{channel, Sender, Receiver};
+use tokio::sync::mpsc::{channel, Sender};
 use crate::protocol::frame::{Connect, Subscribe, Unsubscribe, Send};
 use std::error::Error;
 use crate::protocol::{StompMessage, ServerCommand, Frame};
@@ -8,10 +8,18 @@ use tokio::time::{Duration, Instant};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use std::sync::Arc;
+use tokio::sync::Mutex;
+use std::collections::HashMap;
+
+type ReceiptId = String;
+type SubscriberId = String;
+type ServerStompSender = Sender<StompMessage<ServerCommand>>;
 
 pub struct Client {
     connection: Arc<Connection>,
-    sender: Sender<StompMessage<ServerCommand>>,
+    sender: ServerStompSender,
+    pending_receipts: Arc<Mutex<HashMap<ReceiptId, ServerStompSender>>>,
+    subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>
 }
 
 pub struct ClientBuilder {
@@ -43,15 +51,46 @@ impl Error for ClientError {}
 
 impl Client {
     pub async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
-        let (sender, _) = channel(5);
+        let (sender, mut receiver) = channel(5);
 
         let client = Self {
             connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
                 sender.clone(),
             ).await),
-            sender: sender.clone(),
+            sender,
+            pending_receipts: Arc::new(Default::default()),
+            subscribers: Arc::new(Default::default())
         };
+
+        let subscribers = Arc::clone(&client.subscribers);
+        let pending_receipts = Arc::clone(&client.pending_receipts);
+        tokio::spawn(async move {
+            loop {
+                match receiver.recv().await {
+                    Some(StompMessage::Frame(frame)) => {
+                        if let Some(receipt_id) = frame.headers.get("receipt-id") {
+                            let lock = pending_receipts.lock().await;
+                            if let Some(pending_sender) = lock.get(receipt_id) {
+                                pending_sender.send(StompMessage::Frame(frame.clone())).await.unwrap();
+                            }
+                            drop(lock);
+                        }
+
+                        if let Some(subscription) = frame.headers.get("subscription") {
+                            let lock = subscribers.lock().await;
+                            if let Some(sub_sender) = lock.get(subscription) {
+                                sub_sender.send(StompMessage::Frame(frame.clone())).await.unwrap();
+                            }
+                            drop(lock);
+                        }
+                        // if frame.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
+                    }
+                    Some(StompMessage::Ping) => {}
+                    None => {}
+                }
+            }
+        });
 
         client.connection.emit(
             Connect::new("1.2".to_owned(), builder.host)
@@ -79,18 +118,19 @@ impl Client {
 
         self.connection.emit(subscribe).await?;
 
-        let mut receiver = self.sender
-            .clone()
-            .subscribe();
+        self.await_receipt(receipt_id.to_string(), destination.clone()).await?;
 
-        Self::process_receipt(&mut receiver, receipt_id.to_string(), destination.clone()).await?;
-
-        let sub_sender = self.sender.clone();
         let sub_connection = Arc::clone(&self.connection);
-        tokio::spawn(async move {
-            let mut sub_recv = sub_sender.subscribe();
 
-            while let Ok(message) = sub_recv.recv().await {
+        let (sub_sender, receiver) = channel(5);
+        let mut lock = self.subscribers.lock().await;
+        lock.insert(subscriber_id.to_string(), sub_sender);
+        drop(lock);
+
+        tokio::spawn(async move {
+            let mut sub_recv = receiver;
+
+            while let Some(message) = sub_recv.recv().await {
                 if let StompMessage::Frame(frame) = message {
                     let subscription_header = frame.headers.get("subscription");
                     let destination_header = frame.headers.get("destination");
@@ -120,26 +160,28 @@ impl Client {
                 .body(message)
         ).await?;
 
-        let mut receiver = self.sender
-            .clone()
-            .subscribe();
-
-        Self::process_receipt(&mut receiver, receipt_id.to_string(), destination)
+        self.await_receipt(receipt_id.to_string(), destination)
             .await?;
 
         Ok(())
     }
 
-    async fn process_receipt(
-        receiver: &mut Receiver<StompMessage<ServerCommand>>,
+    async fn await_receipt(
+        &self,
         receipt_id: String,
         destination: String,
     ) -> Result<(), Box<dyn Error>> {
         let start = Instant::now();
 
+        let (sender, mut receiver) = channel(1);
+
+        let mut lock = self.pending_receipts.lock().await;
+        lock.insert(receipt_id.clone(), sender);
+        drop(lock);
+
         loop {
             match tokio::time::timeout(Duration::from_millis(10), receiver.recv()).await {
-                Ok(Ok(StompMessage::Frame(val))) => {
+                Ok(Some(StompMessage::Frame(val))) => {
                     match val.command {
                         ServerCommand::Receipt => {
                             if val.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
@@ -153,9 +195,6 @@ impl Client {
                         }
                         _ => { /* non-relevant frame */ }
                     }
-                }
-                Ok(Err(cause)) => {
-                    return Err(Box::new(ClientError::ConnectionError(Box::new(cause))));
                 }
                 Ok(_) => { /* ignore, message not relevant for this process */ }
                 Err(_) => { /* elapsed time check done later */ }

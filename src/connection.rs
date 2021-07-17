@@ -4,17 +4,16 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
 use tokio::io::{ErrorKind, AsyncWriteExt};
 use crate::protocol::BNF_LF;
-use tokio::sync::broadcast::Sender as BroadcastSender;
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
-    server_sender: BroadcastSender<StompMessage<ServerCommand>>,
+    server_sender: Sender<StompMessage<ServerCommand>>,
 }
 
 impl Connection {
     pub async fn new(
         mut tcp_stream: TcpStream,
-        server_sender: BroadcastSender<StompMessage<ServerCommand>>,
+        server_sender: Sender<StompMessage<ServerCommand>>,
     ) -> Self {
         let (sender, mut receiver) = channel(5);
 
@@ -41,7 +40,7 @@ impl Connection {
                             Ok(n) => {
                                 if let Ok(messages) = parser.parse(&msg[..n]) {
                                     for message in messages {
-                                        inner_sender.send(message).unwrap();
+                                        inner_sender.send(message).await.unwrap();
                                     }
                                 }
 
