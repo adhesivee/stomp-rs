@@ -72,7 +72,7 @@ impl Client {
                         if let Some(receipt_id) = frame.headers.get("receipt-id") {
                             let lock = pending_receipts.lock().await;
                             if let Some(pending_sender) = lock.get(receipt_id) {
-                                pending_sender.send(StompMessage::Frame(frame.clone())).await.unwrap();
+                                pending_sender.send(StompMessage::Frame(frame.clone())).await;
                             }
                             drop(lock);
                         }
@@ -80,7 +80,7 @@ impl Client {
                         if let Some(subscription) = frame.headers.get("subscription") {
                             let lock = subscribers.lock().await;
                             if let Some(sub_sender) = lock.get(subscription) {
-                                sub_sender.send(StompMessage::Frame(frame.clone())).await.unwrap();
+                                sub_sender.send(StompMessage::Frame(frame.clone())).await;
                             }
                             drop(lock);
                         }
@@ -173,6 +173,7 @@ impl Client {
 
         let (sender, mut receiver) = channel(1);
 
+
         let mut lock = self.pending_receipts.lock().await;
         lock.insert(receipt_id.clone(), sender);
         drop(lock);
@@ -182,9 +183,11 @@ impl Client {
                 Ok(Some(StompMessage::Frame(val))) => {
                     match val.command {
                         ServerCommand::Receipt => {
+                            self.clean_receipt(&receipt_id).await;
                             return Ok(());
                         }
                         ServerCommand::Error => {
+                            self.clean_receipt(&receipt_id).await;
                             return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
                         }
                         _ => { /* non-relevant frame */ }
@@ -195,8 +198,14 @@ impl Client {
             }
 
             if start.elapsed().as_millis() > 2000 {
+                self.clean_receipt(&receipt_id).await;
                 return Err(Box::new(ClientError::ReceiptTimeout("".to_owned())));
             }
         }
+    }
+
+    async fn clean_receipt(&self, receipt_id: &String) {
+        let mut lock = self.pending_receipts.lock().await;
+        lock.remove(receipt_id);
     }
 }
