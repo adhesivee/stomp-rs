@@ -16,7 +16,7 @@ pub enum ClientCommand {
     Begin,
     Commit,
     Abort,
-    Disconnect
+    Disconnect,
 }
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ pub enum ServerCommand {
     Connected,
     Message,
     Receipt,
-    Error
+    Error,
 }
 
 impl From<ServerCommand> for &str {
@@ -89,13 +89,10 @@ impl TryFrom<&str> for ServerCommand {
     }
 }
 
-impl Command for ServerCommand {
+impl Command for ServerCommand {}
 
-}
+impl Command for ClientCommand {}
 
-impl Command for ClientCommand {
-
-}
 #[derive(Debug, Clone)]
 pub struct Frame<T>
     where T: Into<&'static str> {
@@ -104,7 +101,7 @@ pub struct Frame<T>
     pub(crate) body: String,
 }
 
-impl <T> Frame<T>
+impl<T> Frame<T>
     where T: Into<&'static str> + Copy {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = vec![];
@@ -150,16 +147,13 @@ const BNF_NULL: u8 = 0;
 pub(crate) const BNF_LF: u8 = 10;
 const BNF_CR: u8 = 13;
 
-pub trait Command: Into<&'static str> + for<'a> TryFrom<&'a str> {
-
-}
+pub trait Command: Into<&'static str> + for<'a> TryFrom<&'a str> {}
 
 
 pub struct FrameParser<T: Command> {
     buffer: Vec<u8>,
     state: ReadingState,
 
-    allowed_read: &'static [AllowedValues],
     current_command: Option<T>,
     current_headers: Option<HashMap<String, String>>,
 }
@@ -169,10 +163,6 @@ pub enum StompMessage<T: Command + Clone> {
     Frame(Frame<T>),
     Ping,
 }
-
-const DEFAULT_ALLOWED_READ: [AllowedValues; 3] = [AllowedValues::Octet, AllowedValues::CR, AllowedValues::LF];
-const LF_ALLOWED_READ: [AllowedValues; 1] = [AllowedValues::LF];
-const BODY_ALLOWED_READ: [AllowedValues; 2] = [AllowedValues::Octet, AllowedValues::Null];
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -185,17 +175,13 @@ impl Display for ParseError {
     }
 }
 
-impl Error for ParseError {
+impl Error for ParseError {}
 
-}
-
-impl <T: Command + Clone> FrameParser<T> {
-
+impl<T: Command + Clone> FrameParser<T> {
     pub fn new() -> FrameParser<T> {
         FrameParser {
             buffer: vec![],
             state: ReadingState::Command,
-            allowed_read: &DEFAULT_ALLOWED_READ,
             current_command: None,
             current_headers: None,
         }
@@ -203,84 +189,88 @@ impl <T: Command + Clone> FrameParser<T> {
 
     pub fn parse(&mut self, body: &[u8]) -> Result<Vec<StompMessage<T>>, ParseError> {
         let mut frames = vec![];
-        for byte in body {
-            if self.state == ReadingState::Completed && *byte == BNF_LF {
-                frames.push(StompMessage::Ping);
-            } else if self.state == ReadingState::Completed && *byte != BNF_LF && *byte != BNF_CR {
-                self.state = ReadingState::Command
-            }
 
-            if (self.allowed_read.contains(&AllowedValues::LF) && *byte == BNF_LF) ||
-                (self.allowed_read.contains(&AllowedValues::Null) && *byte == BNF_NULL) {
-                match self.state {
-                    ReadingState::Command => {
-                        let command_string = String::from_utf8(self.buffer.clone())
-                            .unwrap();
+        let mut body_slice = &body[..];
 
-                        let command = T::try_from(&command_string);
+        loop {
+            let collect_until = match self.state {
+                ReadingState::Command => BNF_LF,
+                ReadingState::Header => BNF_LF,
+                ReadingState::Body => BNF_NULL,
+                ReadingState::Completed => BNF_LF
+            };
 
-                        self.current_command = match command {
-                            Ok(value) => Some(value),
-                            Err(_) => {  return Err(ParseError::CommandNotFound(command_string.to_string())); }
-                        };
+            let position = &body_slice.iter()
+                .position(|b| *b == collect_until);
 
-                        self.state = ReadingState::Header;
-                        self.current_headers = Some(HashMap::new());
-                        self.allowed_read = &DEFAULT_ALLOWED_READ;
-                        self.buffer.clear();
-                    }
-                    ReadingState::Header => {
-                        if self.buffer.is_empty() {
-                            self.state = ReadingState::Body;
-                            self.allowed_read = &BODY_ALLOWED_READ;
-                            self.buffer.clear();
-                        } else {
-                            let header_line = String::from_utf8(self.buffer.clone()).unwrap();
-                            let mut header = header_line.split(':');
-                            self.current_headers.as_mut()
-                                .unwrap()
-                                .insert(header.next().unwrap().trim().to_string(), header.next().unwrap().trim().to_string());
-                            self.allowed_read = &DEFAULT_ALLOWED_READ;
-                            self.buffer.clear();
-                        }
-                    }
-                    ReadingState::Body => {
-                        let body = String::from_utf8(self.buffer.clone()).unwrap();
-
-                        self.allowed_read = &DEFAULT_ALLOWED_READ;
-                        self.state = ReadingState::Completed;
-                        self.buffer.clear();
-
-                        let mut frame_command = None::<T>;
-                        let mut frame_headers = None::<HashMap<String, String>>;
-
-                        std::mem::swap(&mut self.current_command, &mut frame_command);
-                        std::mem::swap(&mut self.current_headers, &mut frame_headers);
-
-                        frames.push(
-                            StompMessage::Frame(
-                                Frame {
-                                    command: frame_command.unwrap(),
-                                    headers: frame_headers.unwrap(),
-                                    body,
-                                }
-                            )
-                        );
-
-                        self.current_headers = None;
-                        self.current_command = None;
-                    }
-                    ReadingState::Completed => {
-                        self.buffer.clear();
-                    }
+            match position {
+                Some(position) => {
+                    self.buffer.extend(&body_slice[..*position]);
+                    body_slice = &body_slice[(u32::try_from(*position).unwrap() + 1) as usize..];
                 }
-
-                continue;
+                None => {
+                    self.buffer.extend(&body_slice[..]);
+                    break;
+                }
             }
 
             if let ReadingState::Completed = self.state {
-            } else {
-                self.buffer.push(*byte);
+                if !self.buffer.is_empty() && self.buffer.iter().any(|b| *b != BNF_CR) {
+                    self.state = ReadingState::Command;
+                }
+            }
+
+            match self.state {
+                ReadingState::Command => {
+                    let buffer = std::mem::take(&mut self.buffer);
+                    let command_string = String::from_utf8(buffer)
+                        .unwrap();
+
+                    let command = T::try_from(&command_string);
+
+                    self.current_command = match command {
+                        Ok(value) => Some(value),
+                        Err(_) => { return Err(ParseError::CommandNotFound(command_string.to_string())); }
+                    };
+
+                    self.state = ReadingState::Header;
+                    self.current_headers = Some(HashMap::new());
+                }
+                ReadingState::Header => {
+                    if self.buffer.is_empty() {
+                        self.state = ReadingState::Body;
+                    } else {
+                        let buffer = std::mem::take(&mut self.buffer);
+                        let header_line = String::from_utf8(buffer).unwrap();
+                        let mut header = header_line.split(':');
+                        self.current_headers.as_mut()
+                            .unwrap()
+                            .insert(header.next().unwrap().trim().to_string(), header.next().unwrap().trim().to_string());
+                    }
+                }
+                ReadingState::Body => {
+                    let buffer = std::mem::take(&mut self.buffer);
+                    let body = String::from_utf8(buffer).unwrap();
+
+                    self.state = ReadingState::Completed;
+
+                    let mut frame_command = std::mem::take(&mut self.current_command);
+                    let mut frame_headers = std::mem::take(&mut self.current_headers);
+
+                    frames.push(
+                        StompMessage::Frame(
+                            Frame {
+                                command: frame_command.unwrap(),
+                                headers: frame_headers.unwrap(),
+                                body,
+                            }
+                        )
+                    );
+                }
+                ReadingState::Completed => {
+                    frames.push(StompMessage::Ping);
+                    self.buffer.clear();
+                }
             }
         }
 
