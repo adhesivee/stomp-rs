@@ -205,7 +205,17 @@ impl<T: Command + Clone> FrameParser<T> {
 
             match position {
                 Some(position) => {
-                    self.buffer.extend(&body_slice[..*position]);
+                    let previous_position = position.saturating_sub(1 as usize);
+
+                    let buffer_until = if collect_until == BNF_LF && body_slice.get(previous_position)
+                        .iter()
+                        .all(|b| **b == BNF_CR) {
+                        previous_position
+                    } else {
+                        *position
+                    };
+
+                    self.buffer.extend(&body_slice[..buffer_until]);
                     body_slice = &body_slice[(u32::try_from(*position).unwrap() + 1) as usize..];
                 }
                 None => {
@@ -324,6 +334,53 @@ mod test {
             assert_eq!(headers.get("test_val").unwrap(), "heeerre");
 
             assert_eq!(frame.body, "body\n\
+first body");
+            println!("{:?}", frame);
+        }
+    }
+
+    #[tokio::test]
+    async fn parse_test_cr() {
+        let body = "SEND\r\n\
+        test: value\r\n\
+        test_val: heeerre\r\n\
+        \r\n\
+        body\r\n\
+        first body\0\n\n\
+        \r\n\
+        \r\n\
+        SEND\n\
+        test2: value\n\
+        \n\
+        body : test\n\
+        second body\0
+        ".as_bytes();
+
+        let mut frames = vec![];
+        let mut parser: FrameParser<ClientCommand> = FrameParser::new();
+
+        for body_chunk in body.chunks(4) {
+            frames.append(
+                &mut parser.parse(body_chunk).unwrap()
+            );
+        }
+
+
+        let frame = frames.first();
+
+        assert!(frame.is_some());
+        let frame = frame.unwrap();
+
+        if let StompMessage::Frame(frame) = frame {
+            assert_eq!(frame.command, ClientCommand::Send);
+            let headers = &frame.headers;
+
+            assert!(headers.contains_key("test"));
+            assert_eq!(headers.get("test").unwrap(), "value");
+            assert!(headers.contains_key("test_val"));
+            assert_eq!(headers.get("test_val").unwrap(), "heeerre");
+
+            assert_eq!(frame.body, "body\r\n\
 first body");
             println!("{:?}", frame);
         }
