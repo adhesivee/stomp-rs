@@ -19,7 +19,7 @@ impl Connection {
 
         let inner_sender = server_sender.clone();
         tokio::spawn(async move {
-            let mut msg = vec![0; 1024];
+            let mut msg = vec![0; 8096];
             let mut parser: FrameParser<ServerCommand> = FrameParser::new();
 
             loop {
