@@ -1,107 +1,67 @@
 use crate::protocol::{Frame, ClientCommand};
 use std::collections::HashMap;
 
-pub struct Nack {
-    headers: HashMap<String, String>
-}
-
-impl Nack {
-    pub fn new(id: String) -> Self {
-        let mut headers = HashMap::new();
-        headers.insert("id".to_string(), id);
-
-        Self {
-            headers
+macro_rules! default_frame {
+    ($struct:ident($($initname:ident),*) => $command:expr => $($method:ident ($($names:ident),+)),+) => {
+        pub struct $struct {
+            headers: HashMap<String, String>
         }
-    }
 
-    pub fn transaction(self, tx_id: String) -> Self {
-        self.header("transaction".to_string(), tx_id)
-    }
+        impl $struct {
+            pub fn new($($initname: String),*) -> Self {
+                let mut headers = HashMap::new();
+                $(headers.insert(stringify!($initname).to_string().replace('_', "-"), $initname);)*
 
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
+                Self {
+                    headers
+                }
+            }
 
-        self
-    }
-}
+            $(pub fn $method(self, $($names: String),+) -> Self {{
+                let mut current = self;
+                $(current = current.header(stringify!($names).to_string().replace('_', "-"), $names);),+
 
-impl Into<Frame<ClientCommand>> for Nack {
-    fn into(self) -> Frame<ClientCommand> {
-        Frame {
-            command: ClientCommand::Ack,
-            headers: self.headers,
-            body: "".to_string()
+                current
+            }}),+
+
+            pub fn header(mut self, key: String, value: String) -> Self {
+                self.headers.insert(key, value);
+
+                self
+            }
         }
-    }
-}
 
-pub struct Ack {
-    headers: HashMap<String, String>
-}
-
-impl Ack {
-    pub fn new(id: String) -> Self {
-        let mut headers = HashMap::new();
-        headers.insert("id".to_string(), id);
-
-        Ack {
-            headers
-        }
-    }
-
-    pub fn transaction(self, tx_id: String) -> Self {
-        self.header("transaction".to_string(), tx_id)
-    }
-
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
-
-        self
-    }
-}
-
-impl Into<Frame<ClientCommand>> for Ack {
-    fn into(self) -> Frame<ClientCommand> {
-        Frame {
-            command: ClientCommand::Ack,
-            headers: self.headers,
-            body: "".to_string()
+        impl Into<Frame<ClientCommand>> for $struct {
+            fn into(self) -> Frame<ClientCommand> {
+                Frame {
+                    command: $command,
+                    headers: self.headers,
+                    body: "".to_string()
+                }
+            }
         }
     }
 }
 
-pub struct Connect {
-    headers: HashMap<String, String>
-}
+
+default_frame!(
+    Nack(id) => ClientCommand::Nack =>
+        transaction (transaction)
+);
+
+default_frame!(
+    Ack(id) => ClientCommand::Ack =>
+        transaction (transaction)
+);
+
+default_frame!(
+    Connect(accept_version, host) => ClientCommand::Connect =>
+        test (val)
+);
 
 impl Connect {
-    pub fn new(accept_version: String, host: String) -> Self {
-        let mut headers = HashMap::new();
-        headers.insert("accept-version".to_string(), accept_version);
-        headers.insert("host".to_string(), host);
-
-        Connect { headers }
-    }
-
     pub fn heartbeat(self, client_interval: u32, server_interval: u32) -> Self {
         self.header("heart-beat".to_string(), format!("{},{}", client_interval, server_interval))
-    }
-
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
-
-        self
-    }
-}
-
-impl Into<Frame<ClientCommand>> for Connect {
-    fn into(self) -> Frame<ClientCommand> {
-        Frame {
-            command: ClientCommand::Connect,
-            headers: self.headers,
-            body: "".to_string()
-        }
     }
 }
 
@@ -145,77 +105,35 @@ impl Into<Frame<ClientCommand>> for Send {
     }
 }
 
-pub struct Subscribe {
-    headers: HashMap<String, String>
-}
+default_frame!(
+    Subscribe(id, destination) => ClientCommand::Subscribe =>
+        receipt (receipt)
+);
 
-impl Subscribe {
-    pub fn new(id: String, destination: String) -> Self {
-        let mut headers = HashMap::new();
-        headers.insert("id".to_string(), id);
-        headers.insert("destination".to_string(), destination);
+default_frame!(
+    Unsubscribe(id) => ClientCommand::Unsubscribe =>
+        receipt (receipt)
+);
 
-        Subscribe {
-            headers
-        }
-    }
+default_frame!(
+    Begin(transaction) => ClientCommand::Begin =>
+        receipt (receipt)
+);
 
-    pub fn receipt(self, receipt_id: String) -> Self {
-        self.header("receipt".to_string(), receipt_id)
-    }
+default_frame!(
+    Commit(transaction) => ClientCommand::Commit =>
+        receipt (receipt)
+);
 
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
+default_frame!(
+    Abort(transaction) => ClientCommand::Abort =>
+        receipt (receipt)
+);
 
-        self
-    }
-}
-
-impl Into<Frame<ClientCommand>> for Subscribe {
-    fn into(self) -> Frame<ClientCommand> {
-        Frame {
-            command: ClientCommand::Subscribe,
-            headers: self.headers,
-            body: "".to_string()
-        }
-    }
-}
-
-
-pub struct Unsubscribe {
-    headers: HashMap<String, String>
-}
-
-impl Unsubscribe {
-    pub fn new(id: String) -> Self {
-        let mut headers = HashMap::new();
-        headers.insert("id".to_string(), id);
-
-        Self {
-            headers
-        }
-    }
-
-    pub fn receipt(self, receipt_id: String) -> Self {
-        self.header("receipt".to_string(), receipt_id)
-    }
-
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
-
-        self
-    }
-}
-
-impl Into<Frame<ClientCommand>> for Unsubscribe {
-    fn into(self) -> Frame<ClientCommand> {
-        Frame {
-            command: ClientCommand::Unsubscribe,
-            headers: self.headers,
-            body: "".to_string()
-        }
-    }
-}
+default_frame!(
+    Disconnect(transaction) => ClientCommand::Disconnect =>
+        receipt (receipt)
+);
 
 #[cfg(test)]
 mod tests {
@@ -247,7 +165,7 @@ mod tests {
             .header(test_header.to_owned(), test_value.to_owned())
             .into();
 
-        assert_eq!(frame.command, ClientCommand::Ack);
+        assert_eq!(frame.command, ClientCommand::Nack);
         assert_eq!(frame.headers["id"], nack_id);
         assert_eq!(frame.headers[test_header], test_value);
     }
