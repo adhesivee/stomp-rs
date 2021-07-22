@@ -2,7 +2,7 @@ use crate::protocol::{Frame, ClientCommand};
 use std::collections::HashMap;
 
 macro_rules! default_frame {
-    ($struct:ident($($initname:ident),*) => $command:expr => $($method:ident ($($names:ident),+)),+) => {
+    ($struct:ident($($initname:ident),*) => $($method:ident ($($names:ident),+)),*) => {
         pub struct $struct {
             headers: HashMap<String, String>
         }
@@ -19,10 +19,10 @@ macro_rules! default_frame {
 
             $(pub fn $method(self, $($names: String),+) -> Self {{
                 let mut current = self;
-                $(current = current.header(stringify!($names).to_string().replace('_', "-"), $names);),+
+                $(current = current.header(stringify!($names).to_string().replace('_', "-"), $names);)+
 
                 current
-            }}),+
+            }})*
 
             pub fn header(mut self, key: String, value: String) -> Self {
                 self.headers.insert(key, value);
@@ -34,7 +34,7 @@ macro_rules! default_frame {
         impl Into<Frame<ClientCommand>> for $struct {
             fn into(self) -> Frame<ClientCommand> {
                 Frame {
-                    command: $command,
+                    command: ClientCommand::$struct,
                     headers: self.headers,
                     body: "".to_string()
                 }
@@ -44,20 +44,9 @@ macro_rules! default_frame {
 }
 
 
-default_frame!(
-    Nack(id) => ClientCommand::Nack =>
-        transaction (transaction)
-);
-
-default_frame!(
-    Ack(id) => ClientCommand::Ack =>
-        transaction (transaction)
-);
-
-default_frame!(
-    Connect(accept_version, host) => ClientCommand::Connect =>
-        test (val)
-);
+default_frame!(Nack(id) => transaction (transaction));
+default_frame!(Ack(id) => transaction (transaction));
+default_frame!(Connect(accept_version, host) => );
 
 impl Connect {
     pub fn heartbeat(self, client_interval: u32, server_interval: u32) -> Self {
@@ -105,35 +94,12 @@ impl Into<Frame<ClientCommand>> for Send {
     }
 }
 
-default_frame!(
-    Subscribe(id, destination) => ClientCommand::Subscribe =>
-        receipt (receipt)
-);
-
-default_frame!(
-    Unsubscribe(id) => ClientCommand::Unsubscribe =>
-        receipt (receipt)
-);
-
-default_frame!(
-    Begin(transaction) => ClientCommand::Begin =>
-        receipt (receipt)
-);
-
-default_frame!(
-    Commit(transaction) => ClientCommand::Commit =>
-        receipt (receipt)
-);
-
-default_frame!(
-    Abort(transaction) => ClientCommand::Abort =>
-        receipt (receipt)
-);
-
-default_frame!(
-    Disconnect(transaction) => ClientCommand::Disconnect =>
-        receipt (receipt)
-);
+default_frame!(Subscribe(id, destination) => receipt (receipt));
+default_frame!(Unsubscribe(id) => receipt (receipt));
+default_frame!(Begin(transaction) => receipt (receipt));
+default_frame!(Commit(transaction) => receipt (receipt));
+default_frame!(Abort(transaction) => receipt (receipt));
+default_frame!(Disconnect(transaction) => receipt (receipt));
 
 #[cfg(test)]
 mod tests {
