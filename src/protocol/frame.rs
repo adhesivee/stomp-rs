@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 macro_rules! default_frame {
     ($struct:ident($($initname:ident),*) => $($method:ident ($($names:ident),+)),*) => {
+        #[derive(Debug, Clone)]
         pub struct $struct {
             headers: HashMap<String, String>
         }
@@ -44,8 +45,8 @@ macro_rules! default_frame {
 }
 
 
-default_frame!(Nack(id) => transaction (transaction));
-default_frame!(Ack(id) => transaction (transaction));
+default_frame!(Nack(id) => transaction (transaction), receipt(receipt));
+default_frame!(Ack(id) => transaction (transaction), receipt(receipt));
 default_frame!(Connect(accept_version, host) => );
 
 impl Connect {
@@ -54,6 +55,7 @@ impl Connect {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Send {
     headers: HashMap<String, String>,
     payload: String
