@@ -4,10 +4,12 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
 use tokio::io::{ErrorKind, AsyncWriteExt};
 use crate::protocol::BNF_LF;
+use tokio::sync::oneshot::Receiver;
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
     server_sender: Sender<StompMessage<ServerCommand>>,
+    close_sender: Sender<()>
 }
 
 impl Connection {
@@ -18,6 +20,7 @@ impl Connection {
         let (sender, mut receiver) = channel(5);
 
         let inner_sender = server_sender.clone();
+        let (close_sender, mut close_receiver) = channel(1);
         tokio::spawn(async move {
             let mut msg = vec![0; 8096];
             let mut parser: FrameParser<ServerCommand> = FrameParser::new();
@@ -54,15 +57,23 @@ impl Connection {
                             }
                         }
                     }
+                    _ = close_receiver.recv() => {
+                        tcp_stream.shutdown()
+                            .await
+                            .unwrap();
 
+                        break;
+                    }
                 }
                 ;
             }
         });
 
+
         Connection {
             client_sender: sender,
             server_sender,
+            close_sender
         }
     }
 
@@ -76,5 +87,9 @@ impl Connection {
         self.client_sender
             .send(StompMessage::Ping)
             .await
+    }
+
+    pub async fn close(&self) {
+        self.close_sender.send(());
     }
 }

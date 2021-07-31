@@ -35,37 +35,57 @@ impl InnerClient {
 
         let subscribers = Arc::clone(&client.subscribers);
         let pending_receipts = Arc::clone(&client.pending_receipts);
-        tokio::spawn(async move {
-            loop {
-                match receiver.recv().await {
-                    Some(StompMessage::Frame(frame)) => {
-                        if let Some(receipt_id) = frame.headers.get("receipt-id") {
-                            let lock = pending_receipts.lock().await;
-                            if let Some(pending_sender) = lock.get(receipt_id) {
-                                pending_sender.send(StompMessage::Frame(frame.clone())).await;
-                            }
-                            drop(lock);
-                        }
+        let server_timeout: u128 = builder.heartbeat.unwrap_or_else(|| (0, 0)).1.into();
+        let connection = client.connection.clone();
 
-                        if let Some(subscription) = frame.headers.get("subscription") {
-                            let lock = subscribers.lock().await;
-                            if let Some(sub_sender) = lock.get(subscription) {
-                                sub_sender.send(StompMessage::Frame(frame.clone())).await;
+        tokio::spawn(async move {
+            let mut last_heartbeat = Instant::now();
+
+            loop {
+                if server_timeout > 0 && last_heartbeat.elapsed().as_millis() > server_timeout {
+                    connection
+                        .clone()
+                        .close();
+                }
+
+                if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
+                    match message {
+                        Some(StompMessage::Frame(frame)) => {
+                            last_heartbeat = Instant::now();
+
+                            if let Some(receipt_id) = frame.headers.get("receipt-id") {
+                                let lock = pending_receipts.lock().await;
+                                if let Some(pending_sender) = lock.get(receipt_id) {
+                                    pending_sender.send(StompMessage::Frame(frame.clone())).await;
+                                }
+                                drop(lock);
                             }
-                            drop(lock);
+
+                            if let Some(subscription) = frame.headers.get("subscription") {
+                                let lock = subscribers.lock().await;
+                                if let Some(sub_sender) = lock.get(subscription) {
+                                    sub_sender.send(StompMessage::Frame(frame.clone())).await;
+                                }
+                                drop(lock);
+                            }
+                            // if frame.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
                         }
-                        // if frame.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
+                        Some(StompMessage::Ping) => {
+                            last_heartbeat = Instant::now()
+                        }
+                        None => {}
                     }
-                    Some(StompMessage::Ping) => {}
-                    None => {}
                 }
             }
         });
 
-        client.emit(
-            Connect::new("1.2".to_owned(), builder.host)
-                .into()
-        ).await?;
+        let mut connect_frame = Connect::new("1.2".to_owned(), builder.host);
+
+        if let Some(heartbeat) = builder.heartbeat {
+            connect_frame = connect_frame.heartbeat(heartbeat.0, heartbeat.1);
+        }
+
+        client.emit(connect_frame.into()).await?;
 
         Ok(client)
     }
@@ -169,7 +189,7 @@ impl InnerClient {
                     Ack::new(ack_id),
                     |ack, header| {
                         ack.header(header.0.to_string(), header.1.to_string())
-                    }
+                    },
                 )
                 .receipt(Uuid::new_v4().to_string())
                 .into()
@@ -184,7 +204,7 @@ impl InnerClient {
                     Nack::new(nack_id),
                     |nack, header| {
                         nack.header(header.0.to_string(), header.1.to_string())
-                    }
+                    },
                 )
                 .receipt(Uuid::new_v4().to_string())
                 .into()

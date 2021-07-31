@@ -101,13 +101,21 @@ pub struct Client {
 
 pub struct ClientBuilder {
     host: String,
+    heartbeat: Option<(u32, u32)>
 }
 
 impl ClientBuilder {
     pub fn new(host: String) -> Self {
         Self {
-            host
+            host,
+            heartbeat: None
         }
+    }
+
+    pub fn heartbeat(mut self, client_interval: u32, server_interval: u32) -> Self {
+        self.heartbeat = Some((client_interval, server_interval));
+
+        self
     }
 }
 
