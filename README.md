@@ -22,6 +22,20 @@ if let Some(frame) = rx.recv().await {
 
 Sending:
 ```rust
-client.send("/topic/test".to_string(), "test-message".to_string())
-    .await?;
+client.send(
+    "/topic/test".to_string(),
+    "test-message".to_string(),
+    None,
+).await?
+```
+
+Transaction:
+```rust
+let transaction = client.begin().await?;
+
+transaction.send(
+    "/topic/test".to_string(),
+    "test-message".to_string(),
+    None,
+).await?
 ```

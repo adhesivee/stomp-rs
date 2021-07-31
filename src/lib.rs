@@ -17,10 +17,11 @@
 //! ```no_run
 //! use stomp_rs::protocol::frame::Send;
 //!
-//! client.emit(
-//!     Send::new("/topic/test".to_string())
-//!         .body("test-payload".to_string())
-//! );
+//! client.send(
+//!     "/topic/test".to_string(),
+//!     "test-message".to_string(),
+//!     None,
+//! ).await?
 //! ```
 pub mod protocol;
 pub mod client;
