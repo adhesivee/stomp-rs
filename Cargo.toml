@@ -21,3 +21,7 @@ readme = "README.md"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "0.8", features = ["v4"] }
+log = "0.4"
+
+[dev-dependencies]
+simple_logger = "1.13"

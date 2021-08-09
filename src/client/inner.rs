@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
 use std::mem::{swap, take};
+use log::debug;
 
 pub(crate) struct InnerClient {
     pub(crate) connection: Arc<Connection>,
@@ -46,6 +47,7 @@ impl InnerClient {
             let mut connected_sender = Some(connected_sender);
             loop {
                 if connection.is_closed().await {
+                    debug!("Connection closed, closing client");
                     receiver.close();
                 }
 
@@ -58,6 +60,7 @@ impl InnerClient {
                 if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
                     match message {
                         Some(StompMessage::Frame(frame)) => {
+                            debug!("Frame received: {:?}", frame.clone());
                             last_heartbeat = Instant::now();
 
                             if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {

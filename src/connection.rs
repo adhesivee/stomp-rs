@@ -8,6 +8,7 @@ use tokio::sync::oneshot::Receiver;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
+use log::debug;
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
@@ -32,10 +33,12 @@ impl Connection {
         tokio::spawn(async move {
             let mut msg = vec![0; 8096];
             let mut parser: FrameParser<ServerCommand> = FrameParser::new();
+            let mut closing = false;
+
 
             loop {
                 tokio::select! {
-                    frame = receiver.recv() => {
+                    frame = receiver.recv(), if !closing => {
                          if let Some(message) = frame {
                             match message {
                                 StompMessage::Frame(frame) => tcp_stream.write_all(&frame.to_bytes()).await.unwrap(),
@@ -45,31 +48,35 @@ impl Connection {
                             tcp_stream.flush().await.unwrap();
                         }
                     },
-                    read = tcp_stream.read(&mut msg) => {
+                    read = tcp_stream.read(&mut msg), if !closing => {
                         match read {
                             Ok(n) => {
                                 match parser.parse(&msg[..n]) {
                                     Ok(messages) => {
                                         for message in messages {
+                                            debug!("Message received {:?}", message.clone());
                                             inner_sender.send(message).await.unwrap();
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
                                         // @TODO: Report cause
+                                        debug!("Parsing error, closing {:?}", e);
                                         inner_close_sender.send(()).await.unwrap();
+                                        closing = true;
                                     }
                                 }
                             }
-                            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {
-
-                            }
-                            Err(_e) => {
+                            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                            Err(e) => {
                                 // @TODO: report cause
-                                inner_close_sender.send(()).await;
+                                debug!("Connection error, closing {:?}", e);
+                                inner_close_sender.send(()).await.unwrap();
+                                closing = true;
                             }
                         }
                     }
                     _ = close_receiver.recv() => {
+                        debug!("Closing connection");
                         tcp_stream.shutdown()
                             .await
                             .unwrap();
