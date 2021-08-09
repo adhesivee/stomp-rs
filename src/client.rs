@@ -123,7 +123,7 @@ impl ClientBuilder {
 pub enum ClientError {
     ReceiptTimeout(String),
     Nack(String),
-    ConnectionError(Box<dyn Error>),
+    ConnectionError(Option<Box<dyn Error>>),
 }
 
 impl Display for ClientError {

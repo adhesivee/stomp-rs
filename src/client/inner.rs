@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
+use std::mem::{swap, take};
 
 pub(crate) struct InnerClient {
     pub(crate) connection: Arc<Connection>,
@@ -38,10 +39,16 @@ impl InnerClient {
         let server_timeout: u128 = builder.heartbeat.unwrap_or_else(|| (0, 0)).1.into();
         let connection = client.connection.clone();
 
+        let (connected_sender, mut connected_receiver) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let mut last_heartbeat = Instant::now();
 
+            let mut connected_sender = Some(connected_sender);
             loop {
+                if connection.is_closed().await {
+                    receiver.close();
+                }
+
                 if server_timeout > 0 && last_heartbeat.elapsed().as_millis() > server_timeout {
                     connection
                         .clone()
@@ -52,6 +59,12 @@ impl InnerClient {
                     match message {
                         Some(StompMessage::Frame(frame)) => {
                             last_heartbeat = Instant::now();
+
+                            if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {
+                                connected_sender.take()
+                                    .unwrap()
+                                    .send(frame.clone()).unwrap();
+                            }
 
                             if let Some(receipt_id) = frame.headers.get("receipt-id") {
                                 let lock = pending_receipts.lock().await;
@@ -68,12 +81,13 @@ impl InnerClient {
                                 }
                                 drop(lock);
                             }
-                            // if frame.headers.contains_key("receipt-id") && *val.headers.get("receipt-id").unwrap() == receipt_id.as_str() {
                         }
                         Some(StompMessage::Ping) => {
                             last_heartbeat = Instant::now()
                         }
-                        None => {}
+                        None => {
+                            break;
+                        }
                     }
                 }
             }
@@ -86,8 +100,16 @@ impl InnerClient {
         }
 
         client.emit(connect_frame.into()).await?;
+        let first_frame = connected_receiver.await?;
 
-        Ok(client)
+        if let ServerCommand::Connected = first_frame.command{
+            Ok(client)
+        } else {
+            // @TODO: Include close reason
+            client.connection.close();
+
+            Err(Box::new(ClientError::ConnectionError(None)))
+        }
     }
 
     pub(crate) async fn subscribe(

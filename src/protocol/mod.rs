@@ -19,7 +19,7 @@ pub enum ClientCommand {
     Disconnect,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum ServerCommand {
     Connected,
     Message,
@@ -96,9 +96,9 @@ impl Command for ClientCommand {}
 #[derive(Debug, Clone)]
 pub struct Frame<T>
     where T: Into<&'static str> {
-    pub(crate) command: T,
-    pub(crate) headers: HashMap<String, String>,
-    pub(crate) body: String,
+    pub command: T,
+    pub headers: HashMap<String, String>,
+    pub body: String,
 }
 
 impl<T> Frame<T>
