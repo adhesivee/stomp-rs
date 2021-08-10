@@ -4,29 +4,32 @@
 Creating new connection:
 ```rust
 let client = Client::connect(
-    ClientBuilder::new("127.0.0.1:61613".to_owned())
+    ClientBuilder::new("127.0.0.1:61613")
 ).await?;
 ```
 
 Subscribing:
 ```rust
-let (tx, mut rx) = channel();
+let (sender, mut receiver) = channel(16);
 
-client.subscribe("/topic/test".to_string(), None, tx)
-    .await?;
-
-if let Some(frame) = rx.recv().await {
-    println!("Frame received: {}", frame.body);
-}
+tokio::spawn(async move {
+  match receiver.recv().await {
+    Some(frame) => { /* process frame */}
+    None => { }
+  }
+});
+client.subscribe(
+    Subscribe::new_with_random_id("/topic/test"),
+    sender
+).await
 ```
 
 Sending:
 ```rust
 client.send(
-    "/topic/test".to_string(),
-    "test-message".to_string(),
-    None,
-).await?
+    Send::new("/topic/test")
+      .body("test-message")
+).await
 ```
 
 Transaction:
@@ -34,8 +37,7 @@ Transaction:
 let transaction = client.begin().await?;
 
 transaction.send(
-    "/topic/test".to_string(),
-    "test-message".to_string(),
-    None,
-).await?
+    Send::new("/topic/test")
+      .body("test-message")
+).await
 ```

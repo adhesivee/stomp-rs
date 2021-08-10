@@ -48,6 +48,7 @@
 //!       None => { }
 //!     }
 //!   });
+//!
 //!   client.subscribe(
 //!       Subscribe::new_with_random_id("/topic/test"),
 //!       sender
