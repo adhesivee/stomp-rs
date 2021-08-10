@@ -99,8 +99,8 @@ impl Into<Frame<ClientCommand>> for Send {
 
 default_frame!(Subscribe(id, destination) => receipt (receipt));
 impl Subscribe {
-    pub fn new_with_random_id(destination: String) {
-        Self::new(Uuid::new_v4().to_string(), destination);
+    pub fn new_with_random_id<A: Into<String>>(destination: A) -> Self {
+        Self::new(Uuid::new_v4().to_string(), destination.into())
     }
 }
 

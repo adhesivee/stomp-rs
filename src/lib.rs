@@ -29,6 +29,30 @@
 //!   ).await
 //! }
 //! ```
+//!
+//! Subscribe:
+//! ```no_run
+//! use stomp_rs::client::Client;
+//! use stomp_rs::protocol::frame::Subscribe;
+//! use tokio::sync::mpsc::channel;
+//! use std::error::Error;
+//! use stomp_rs::protocol::{Frame, ServerCommand};
+//! use std::future::Future;
+//!
+//! async fn subscribe_example(client: &Client)-> Result<(), Box<dyn Error>> {
+//!   let (sender, mut receiver) = channel(16);
+//!
+//!   tokio::spawn(async move {
+//!     match receiver.recv().await {
+//!       Some(frame) => { /* process frame */}
+//!       None => { }
+//!     }
+//!   });
+//!   client.subscribe(
+//!       Subscribe::new_with_random_id("/topic/test"),
+//!       sender
+//!   ).await
+//! }
 pub mod protocol;
 pub mod client;
 pub mod connection;
