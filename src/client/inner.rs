@@ -115,24 +115,15 @@ impl InnerClient {
         }
     }
 
-    pub(crate) async fn subscribe(
-        &self,
-        destination: String,
-        headers: Option<&[(&str, &str)]>,
-        sender: Sender<Frame<ServerCommand>>,
-    ) -> Result<(), Box<dyn Error>> {
-        let subscriber_id = Uuid::new_v4();
+    pub(crate) async fn subscribe(&self, subscribe: Subscribe, sender: Sender<Frame<ServerCommand>>) -> Result<(), Box<dyn Error>> {
+        let destination = subscribe.headers["destination"].clone();
+        let subscriber_id = subscribe.headers["id"].clone();
         let receipt_id = Uuid::new_v4();
 
-        let subscribe = headers.unwrap_or_else(|| &[])
-            .iter()
-            .fold(
-                Subscribe::new(subscriber_id.to_string(), destination.clone()),
-                |subscribe, header| subscribe.header(header.0.to_string(), header.1.to_string()),
-            )
-            .receipt(receipt_id.to_string());
-
-        self.emit(subscribe.into()).await?;
+        self.emit(
+            subscribe.receipt(receipt_id.to_string())
+                .into()
+        ).await?;
 
         let sub_connection = Arc::clone(&self.connection);
 
@@ -163,24 +154,13 @@ impl InnerClient {
         Ok(())
     }
 
-    pub(crate) async fn send(
-        &self,
-        destination: String,
-        message: String,
-        headers: Option<&[(&str, &str)]>,
-    ) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
         let receipt_id = Uuid::new_v4();
 
-        let send = headers.unwrap_or_else(|| &[])
-            .iter()
-            .fold(
-                Send::new(destination.clone()),
-                |send, header| { send.header(header.0.to_string(), header.1.to_string()) },
-            )
-            .receipt(receipt_id.to_string())
-            .body(message);
-
-        self.emit(send.into()).await?;
+        self.emit(
+            send.receipt(receipt_id.to_string())
+                .into()
+        ).await?;
 
         Ok(())
     }
@@ -206,32 +186,16 @@ impl InnerClient {
         Ok(())
     }
 
-    pub(crate) async fn ack(&self, ack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn ack(&self, ack: Ack) -> Result<(), Box<dyn Error>> {
         self.emit(
-            headers.unwrap_or_else(|| &[])
-                .iter()
-                .fold(
-                    Ack::new(ack_id),
-                    |ack, header| {
-                        ack.header(header.0.to_string(), header.1.to_string())
-                    },
-                )
-                .receipt(Uuid::new_v4().to_string())
+            ack.receipt(Uuid::new_v4().to_string())
                 .into()
         ).await
     }
 
-    pub(crate) async fn nack(&self, nack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn nack(&self, nack: Nack) -> Result<(), Box<dyn Error>> {
         self.emit(
-            headers.unwrap_or_else(|| &[])
-                .iter()
-                .fold(
-                    Nack::new(nack_id),
-                    |nack, header| {
-                        nack.header(header.0.to_string(), header.1.to_string())
-                    },
-                )
-                .receipt(Uuid::new_v4().to_string())
+            nack.receipt(Uuid::new_v4().to_string())
                 .into()
         ).await
     }

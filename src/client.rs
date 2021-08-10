@@ -3,7 +3,7 @@ mod inner;
 use tokio::net::TcpStream;
 use crate::connection::Connection;
 use tokio::sync::mpsc::{channel, Sender};
-use crate::protocol::frame::{Connect, Subscribe, Unsubscribe, Send, Begin, Commit, Abort};
+use crate::protocol::frame::{Connect, Subscribe, Unsubscribe, Send, Begin, Commit, Abort, Ack, Nack};
 use std::error::Error;
 use crate::protocol::{StompMessage, ServerCommand, Frame, ClientCommand};
 use tokio::time::{Duration, Instant};
@@ -32,45 +32,24 @@ impl Transaction {
         }
     }
 
-    pub async fn send(
-        &self,
-        destination: String,
-        message: String,
-        headers: Option<&[(&str, &str)]>,
-    ) -> Result<(), Box<dyn Error>> {
-        let mut headers = headers.unwrap_or_else(|| &[])
-            .to_vec();
-
-        headers.push(("transaction", &self.transaction_id));
-
+    pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
         self.inner_client.send(
-            destination,
-            message,
-            Some(&headers[..]),
+            send.header(
+                "transaction".to_string(),
+                self.transaction_id.clone()
+            )
         ).await
     }
 
-    pub async fn ack(&self, ack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
-        let mut headers = headers.unwrap_or_else(|| &[])
-            .to_vec();
-
-        headers.push(("transaction", &self.transaction_id));
-
-        self.inner_client.ack(
-            ack_id,
-            Some(&headers[..]),
+    pub async fn ack(&self, ack: Ack) -> Result<(), Box<dyn Error>> {
+        self.inner_client.ack(ack.transaction(
+            self.transaction_id.clone())
         ).await
     }
 
-    pub async fn nack(&self, nack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
-        let mut headers = headers.unwrap_or_else(|| &[])
-            .to_vec();
-
-        headers.push(("transaction", &self.transaction_id));
-
+    pub async fn nack(&self, nack: Nack) -> Result<(), Box<dyn Error>> {
         self.inner_client.nack(
-            nack_id,
-            Some(&headers[..]),
+            nack.transaction(self.transaction_id.clone())
         ).await
     }
 
@@ -105,9 +84,9 @@ pub struct ClientBuilder {
 }
 
 impl ClientBuilder {
-    pub fn new(host: String) -> Self {
+    pub fn new<A: Into<String>>(host: A) -> Self {
         Self {
-            host,
+            host: host.into(),
             heartbeat: None
         }
     }
@@ -145,30 +124,20 @@ impl Client {
         )
     }
 
-    pub async fn subscribe(
-        &self,
-        destination: String,
-        headers: Option<&[(&str, &str)]>,
-        sender: Sender<Frame<ServerCommand>>,
-    ) -> Result<(), Box<dyn Error>> {
-        self.inner_client.subscribe(destination, headers, sender).await
+    pub async fn subscribe(&self, subscribe: Subscribe, sender: Sender<Frame<ServerCommand>>,) -> Result<(), Box<dyn Error>> {
+        self.inner_client.subscribe(subscribe, sender).await
     }
 
-    pub async fn send(
-        &self,
-        destination: String,
-        message: String,
-        headers: Option<&[(&str, &str)]>,
-    ) -> Result<(), Box<dyn Error>> {
-        self.inner_client.send(destination, message, headers).await
+    pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
+        self.inner_client.send(send).await
     }
 
-    pub async fn ack(&self, ack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
-        self.inner_client.ack(ack_id, headers).await
+    pub async fn ack(&self, ack: Ack) -> Result<(), Box<dyn Error>> {
+        self.inner_client.ack(ack).await
     }
 
-    pub async fn nack(&self, nack_id: String, headers: Option<&[(&str, &str)]>) -> Result<(), Box<dyn Error>> {
-        self.inner_client.nack(nack_id, headers).await
+    pub async fn nack(&self, nack: Nack) -> Result<(), Box<dyn Error>> {
+        self.inner_client.nack(nack).await
     }
 
     pub async fn begin(&self) -> Result<Transaction, Box<dyn Error>> {

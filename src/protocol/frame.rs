@@ -1,32 +1,33 @@
 use crate::protocol::{Frame, ClientCommand};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 macro_rules! default_frame {
     ($struct:ident($($initname:ident),*) => $($method:ident ($($names:ident),+)),*) => {
         #[derive(Debug, Clone)]
         pub struct $struct {
-            headers: HashMap<String, String>
+            pub(crate) headers: HashMap<String, String>
         }
 
         impl $struct {
-            pub fn new($($initname: String),*) -> Self {
+            pub fn new($($initname: impl Into<String>),*) -> Self {
                 let mut headers = HashMap::new();
-                $(headers.insert(stringify!($initname).to_string().replace('_', "-"), $initname);)*
+                $(headers.insert(stringify!($initname).to_string().replace('_', "-"), $initname.into());)*
 
                 Self {
                     headers
                 }
             }
 
-            $(pub fn $method(self, $($names: String),+) -> Self {{
+            $(pub fn $method(self, $($names: impl Into<String>),+) -> Self {{
                 let mut current = self;
                 $(current = current.header(stringify!($names).to_string().replace('_', "-"), $names);)+
 
                 current
             }})*
 
-            pub fn header(mut self, key: String, value: String) -> Self {
-                self.headers.insert(key, value);
+            pub fn header<A: Into<String>, B: Into<String>>(mut self, key: A, value: B) -> Self {
+                self.headers.insert(key.into(), value.into());
 
                 self
             }
@@ -62,25 +63,25 @@ pub struct Send {
 }
 
 impl Send {
-    pub fn new(destination: String) -> Self {
+    pub fn new<A: Into<String>>(destination: A) -> Self {
         let mut headers = HashMap::new();
-        headers.insert("destination".to_string(), destination);
+        headers.insert("destination".to_string(), destination.into());
 
         Send { headers, payload: "".to_string() }
     }
 
-    pub fn body(mut self, payload: String) -> Self {
-        self.payload = payload;
+    pub fn body<A: Into<String>>(mut self, payload: A) -> Self {
+        self.payload = payload.into();
 
         self
     }
 
-    pub fn receipt(self, receipt_id: String) -> Self {
+    pub fn receipt<A: Into<String>>(self, receipt_id: A) -> Self {
         self.header("receipt".to_string(), receipt_id)
     }
 
-    pub fn header(mut self, key: String, value: String) -> Self {
-        self.headers.insert(key, value);
+    pub fn header<A: Into<String>, B: Into<String>>(mut self, key: A, value: B) -> Self {
+        self.headers.insert(key.into(), value.into());
 
         self
     }
@@ -97,6 +98,12 @@ impl Into<Frame<ClientCommand>> for Send {
 }
 
 default_frame!(Subscribe(id, destination) => receipt (receipt));
+impl Subscribe {
+    pub fn new_with_random_id(destination: String) {
+        Self::new(Uuid::new_v4().to_string(), destination);
+    }
+}
+
 default_frame!(Unsubscribe(id) => receipt (receipt));
 default_frame!(Begin(transaction) => receipt (receipt));
 default_frame!(Commit(transaction) => receipt (receipt));

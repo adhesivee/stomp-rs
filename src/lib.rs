@@ -10,7 +10,7 @@
 //!
 //! async fn connect() -> Result<Client, Box<dyn Error>> {
 //!   Client::connect(
-//!       ClientBuilder::new("127.0.0.1:61613".to_string())
+//!       ClientBuilder::new("127.0.0.1:61613")
 //!   ).await
 //! }
 //! ```
@@ -24,9 +24,8 @@
 //!
 //! async fn send_example(client: &Client) -> Result<(), Box<dyn Error>> {
 //!   client.send(
-//!       "/topic/test".to_string(),
-//!       "test-message".to_string(),
-//!       None,
+//!       Send::new("/topic/test")
+//!         .body("test-message")
 //!   ).await
 //! }
 //! ```
