@@ -10,13 +10,10 @@ use crate::connection::Connection;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::error::SendError;
-use std::mem::{swap, take};
 use log::debug;
 
 pub(crate) struct InnerClient {
     pub(crate) connection: Arc<Connection>,
-    sender: ServerStompSender,
     pending_receipts: Arc<Mutex<HashMap<ReceiptId, ServerStompSender>>>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
 }
@@ -28,19 +25,18 @@ impl InnerClient {
         let client = Self {
             connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
-                sender.clone(),
+                sender,
             ).await),
-            sender,
             pending_receipts: Arc::new(Default::default()),
             subscribers: Arc::new(Default::default()),
         };
 
         let subscribers = Arc::clone(&client.subscribers);
         let pending_receipts = Arc::clone(&client.pending_receipts);
-        let server_timeout: u128 = builder.heartbeat.unwrap_or_else(|| (0, 0)).1.into();
+        let server_timeout: u128 = builder.heartbeat.unwrap_or((0, 0)).1.into();
         let connection = client.connection.clone();
 
-        let (connected_sender, mut connected_receiver) = tokio::sync::oneshot::channel();
+        let (connected_sender, connected_receiver) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             let mut last_heartbeat = Instant::now();
 
@@ -54,7 +50,8 @@ impl InnerClient {
                 if server_timeout > 0 && last_heartbeat.elapsed().as_millis() > server_timeout {
                     connection
                         .clone()
-                        .close();
+                        .close()
+                        .await;
                 }
 
                 if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
@@ -109,7 +106,7 @@ impl InnerClient {
             Ok(client)
         } else {
             // @TODO: Include close reason
-            client.connection.close();
+            client.connection.close().await;
 
             Err(Box::new(ClientError::ConnectionError(None)))
         }
@@ -169,7 +166,7 @@ impl InnerClient {
         let receipt = frame.headers.get("receipt").cloned();
 
         if let Some(receipt) = receipt {
-            let (sender, mut receiver) = channel(1);
+            let (sender, receiver) = channel(1);
 
             let mut lock = self.pending_receipts.lock().await;
             lock.insert(receipt.clone(), sender);
@@ -234,7 +231,7 @@ impl InnerClient {
         }
     }
 
-    async fn clean_receipt(&self, receipt_id: &String) {
+    async fn clean_receipt(&self, receipt_id: &str) {
         let mut lock = self.pending_receipts.lock().await;
         lock.remove(receipt_id);
     }

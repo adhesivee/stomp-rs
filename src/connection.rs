@@ -4,15 +4,12 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
 use tokio::io::{ErrorKind, AsyncWriteExt, AsyncReadExt};
 use crate::protocol::BNF_LF;
-use tokio::sync::oneshot::Receiver;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use log::debug;
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
-    server_sender: Sender<StompMessage<ServerCommand>>,
     close_sender: Sender<()>,
     is_closed: Arc<Mutex<bool>>,
 }
@@ -24,7 +21,6 @@ impl Connection {
     ) -> Self {
         let (sender, mut receiver) = channel(5);
 
-        let inner_sender = server_sender.clone();
         let (close_sender, mut close_receiver) = channel(1);
         let inner_close_sender = close_sender.clone();
         let is_closed = Arc::new(Mutex::new(false));
@@ -55,7 +51,7 @@ impl Connection {
                                     Ok(messages) => {
                                         for message in messages {
                                             debug!("Message received {:?}", message.clone());
-                                            inner_sender.send(message).await.unwrap();
+                                            server_sender.send(message).await.unwrap();
                                         }
                                     }
                                     Err(e) => {
@@ -95,7 +91,6 @@ impl Connection {
 
         Connection {
             client_sender: sender,
-            server_sender,
             close_sender,
             is_closed,
         }
@@ -119,6 +114,6 @@ impl Connection {
     }
 
     pub async fn close(&self) {
-        self.close_sender.send(());
+        self.close_sender.send(()).await;
     }
 }

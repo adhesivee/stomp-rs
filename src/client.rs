@@ -1,19 +1,13 @@
 mod inner;
 
-use tokio::net::TcpStream;
-use crate::connection::Connection;
-use tokio::sync::mpsc::{channel, Sender};
-use crate::protocol::frame::{Connect, Subscribe, Unsubscribe, Send, Begin, Commit, Abort, Ack, Nack};
+use tokio::sync::mpsc::Sender;
+use crate::protocol::frame::{Subscribe, Send, Begin, Commit, Abort, Ack, Nack};
 use std::error::Error;
-use crate::protocol::{StompMessage, ServerCommand, Frame, ClientCommand};
-use tokio::time::{Duration, Instant};
+use crate::protocol::{StompMessage, ServerCommand, Frame};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::collections::HashMap;
 use crate::client::inner::InnerClient;
-use tokio::sync::mpsc::error::SendError;
 
 type ReceiptId = String;
 type SubscriberId = String;

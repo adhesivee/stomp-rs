@@ -134,15 +134,6 @@ enum ReadingState {
     Completed,
 }
 
-#[derive(PartialEq)]
-enum AllowedValues {
-    LF,
-    CR,
-    Octet,
-    Null,
-}
-
-
 const BNF_NULL: u8 = 0;
 pub(crate) const BNF_LF: u8 = 10;
 const BNF_CR: u8 = 13;
@@ -205,7 +196,7 @@ impl<T: Command + Clone> FrameParser<T> {
 
             match position {
                 Some(position) => {
-                    let previous_position = position.saturating_sub(1 as usize);
+                    let previous_position = position.saturating_sub(1_usize);
 
                     let buffer_until = if collect_until == BNF_LF && body_slice.get(previous_position)
                         .iter()
@@ -264,8 +255,8 @@ impl<T: Command + Clone> FrameParser<T> {
 
                     self.state = ReadingState::Completed;
 
-                    let mut frame_command = std::mem::take(&mut self.current_command);
-                    let mut frame_headers = std::mem::take(&mut self.current_headers);
+                    let frame_command = std::mem::take(&mut self.current_command);
+                    let frame_headers = std::mem::take(&mut self.current_headers);
 
                     frames.push(
                         StompMessage::Frame(
