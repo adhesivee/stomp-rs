@@ -1,4 +1,5 @@
 mod inner;
+mod receipt_awaiter;
 
 use tokio::sync::mpsc::Sender;
 use crate::protocol::frame::{Subscribe, Send, Begin, Commit, Abort, Ack, Nack};

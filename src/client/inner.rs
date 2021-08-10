@@ -11,10 +11,11 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 use tokio::net::TcpStream;
 use log::debug;
+use crate::client::receipt_awaiter::ReceiptAwaiter;
 
 pub(crate) struct InnerClient {
     pub(crate) connection: Arc<Connection>,
-    pending_receipts: Arc<Mutex<HashMap<ReceiptId, ServerStompSender>>>,
+    receipt_awaiter: Arc<ReceiptAwaiter>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
 }
 
@@ -22,17 +23,17 @@ impl InnerClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
 
+        let receipt_awaiter = Arc::new(ReceiptAwaiter::new());
         let client = Self {
             connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
                 sender,
             ).await),
-            pending_receipts: Arc::new(Default::default()),
+            receipt_awaiter: Arc::clone(&receipt_awaiter),
             subscribers: Arc::new(Default::default()),
         };
 
         let subscribers = Arc::clone(&client.subscribers);
-        let pending_receipts = Arc::clone(&client.pending_receipts);
         let server_timeout: u128 = builder.heartbeat.unwrap_or((0, 0)).1.into();
         let connection = client.connection.clone();
 
@@ -41,6 +42,7 @@ impl InnerClient {
             let mut last_heartbeat = Instant::now();
 
             let mut connected_sender = Some(connected_sender);
+
             loop {
                 if connection.is_closed().await {
                     debug!("Connection closed, closing client");
@@ -66,13 +68,7 @@ impl InnerClient {
                                     .send(frame.clone()).unwrap();
                             }
 
-                            if let Some(receipt_id) = frame.headers.get("receipt-id") {
-                                let lock = pending_receipts.lock().await;
-                                if let Some(pending_sender) = lock.get(receipt_id) {
-                                    pending_sender.send(StompMessage::Frame(frame.clone())).await;
-                                }
-                                drop(lock);
-                            }
+                            receipt_awaiter.process(&frame).await.unwrap();
 
                             if let Some(subscription) = frame.headers.get("subscription") {
                                 let lock = subscribers.lock().await;
@@ -168,13 +164,11 @@ impl InnerClient {
         if let Some(receipt) = receipt {
             let (sender, receiver) = channel(1);
 
-            let mut lock = self.pending_receipts.lock().await;
-            lock.insert(receipt.clone(), sender);
-            drop(lock);
+            self.receipt_awaiter.receipt_request(receipt.clone(), sender).await?;
 
             self.connection.emit(frame).await?;
 
-            self.await_receipt(receipt.clone(), receiver, "".to_string())
+            self.await_receipt(receiver, "".to_string())
                 .await?;
         } else {
             self.connection.emit(frame).await?;
@@ -199,7 +193,6 @@ impl InnerClient {
 
     async fn await_receipt(
         &self,
-        receipt_id: String,
         mut receipt_receiver: Receiver<StompMessage<ServerCommand>>,
         destination: String,
     ) -> Result<(), Box<dyn Error>> {
@@ -210,11 +203,9 @@ impl InnerClient {
                 Ok(Some(StompMessage::Frame(val))) => {
                     match val.command {
                         ServerCommand::Receipt => {
-                            self.clean_receipt(&receipt_id).await;
                             return Ok(());
                         }
                         ServerCommand::Error => {
-                            self.clean_receipt(&receipt_id).await;
                             return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
                         }
                         _ => { /* non-relevant frame */ }
@@ -225,14 +216,8 @@ impl InnerClient {
             }
 
             if start.elapsed().as_millis() > 2000 {
-                self.clean_receipt(&receipt_id).await;
                 return Err(Box::new(ClientError::ReceiptTimeout("".to_owned())));
             }
         }
-    }
-
-    async fn clean_receipt(&self, receipt_id: &str) {
-        let mut lock = self.pending_receipts.lock().await;
-        lock.remove(receipt_id);
     }
 }
