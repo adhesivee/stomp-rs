@@ -12,25 +12,27 @@ use std::collections::HashMap;
 use tokio::net::TcpStream;
 use log::debug;
 use crate::client::receipt_awaiter::ReceiptAwaiter;
+use crate::client::interceptor::Interceptor;
+use std::marker::Send as MarkerSend;
 
 pub(crate) struct InternalClient {
     pub(crate) connection: Arc<Connection>,
-    receipt_awaiter: Arc<ReceiptAwaiter>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
+    interceptors: Arc<Vec<Box<dyn Interceptor + Sync + MarkerSend>>>
 }
 
 impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
 
-        let receipt_awaiter = Arc::new(ReceiptAwaiter::new());
+        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> = Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
         let client = Self {
             connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
                 sender,
             ).await),
-            receipt_awaiter: Arc::clone(&receipt_awaiter),
             subscribers: Arc::new(Default::default()),
+            interceptors: Arc::clone(&interceptors)
         };
 
         let subscribers = Arc::clone(&client.subscribers);
@@ -58,9 +60,13 @@ impl InternalClient {
 
                 if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
                     match message {
-                        Some(StompMessage::Frame(frame)) => {
+                        Some(StompMessage::Frame(mut frame)) => {
                             debug!("Frame received: {:?}", frame.clone());
                             last_heartbeat = Instant::now();
+
+                            for interceptor in interceptors.iter() {
+                                frame = interceptor.before_dispatch(frame).await.unwrap();
+                            }
 
                             if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {
                                 connected_sender.take()
@@ -68,14 +74,16 @@ impl InternalClient {
                                     .send(frame.clone()).unwrap();
                             }
 
-                            receipt_awaiter.process(&frame).await.unwrap();
-
                             if let Some(subscription) = frame.headers.get("subscription") {
                                 let lock = subscribers.lock().await;
                                 if let Some(sub_sender) = lock.get(subscription) {
                                     sub_sender.send(StompMessage::Frame(frame.clone())).await;
                                 }
                                 drop(lock);
+                            }
+
+                            for interceptor in interceptors.iter() {
+                                interceptor.after_dispatch(&frame);
                             }
                         }
                         Some(StompMessage::Ping) => {
@@ -158,18 +166,23 @@ impl InternalClient {
         Ok(())
     }
 
-    pub(crate) async fn emit(&self, frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn emit(&self, mut frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
         let receipt = frame.headers.get("receipt").cloned();
 
         if let Some(receipt) = receipt {
-            let (sender, receiver) = channel(1);
+            // let (sender, receiver) = channel(1);
 
-            self.receipt_awaiter.receipt_request(receipt.clone(), sender).await?;
+            for interceptor in self.interceptors.iter() {
+                frame = interceptor.before_emit(frame)
+                    .await?;
+            }
 
-            self.connection.emit(frame).await?;
+            self.connection.emit(frame.clone()).await?;
 
-            self.await_receipt(receiver, "".to_string())
-                .await?;
+            for interceptor in self.interceptors.iter() {
+                interceptor.after_emit(&frame)
+                    .await?
+            }
         } else {
             self.connection.emit(frame).await?;
         }
@@ -189,35 +202,5 @@ impl InternalClient {
             nack.receipt(Uuid::new_v4().to_string())
                 .into()
         ).await
-    }
-
-    async fn await_receipt(
-        &self,
-        mut receipt_receiver: Receiver<StompMessage<ServerCommand>>,
-        destination: String,
-    ) -> Result<(), Box<dyn Error>> {
-        let start = Instant::now();
-
-        loop {
-            match tokio::time::timeout(Duration::from_millis(10), receipt_receiver.recv()).await {
-                Ok(Some(StompMessage::Frame(val))) => {
-                    match val.command {
-                        ServerCommand::Receipt => {
-                            return Ok(());
-                        }
-                        ServerCommand::Error => {
-                            return Err(Box::new(ClientError::Nack(format!("No received during subscribe of {}", destination))));
-                        }
-                        _ => { /* non-relevant frame */ }
-                    }
-                }
-                Ok(_) => { /* ignore, message not relevant for this process */ }
-                Err(_) => { /* elapsed time check done later */ }
-            }
-
-            if start.elapsed().as_millis() > 2000 {
-                return Err(Box::new(ClientError::ReceiptTimeout("".to_owned())));
-            }
-        }
     }
 }

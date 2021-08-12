@@ -1,7 +1,8 @@
 mod internal;
 mod receipt_awaiter;
+mod interceptor;
 
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{Sender, Receiver};
 use crate::protocol::frame::{Subscribe, Send, Begin, Commit, Abort, Ack, Nack};
 use std::error::Error;
 use crate::protocol::{StompMessage, ServerCommand, Frame};
@@ -13,6 +14,7 @@ use crate::client::internal::InternalClient;
 type ReceiptId = String;
 type SubscriberId = String;
 type ServerStompSender = Sender<StompMessage<ServerCommand>>;
+type ServerStompReceiver = Receiver<StompMessage<ServerCommand>>;
 
 pub struct Transaction {
     transaction_id: String,
