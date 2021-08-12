@@ -13,13 +13,13 @@ use tokio::net::TcpStream;
 use log::debug;
 use crate::client::receipt_awaiter::ReceiptAwaiter;
 
-pub(crate) struct InnerClient {
+pub(crate) struct InternalClient {
     pub(crate) connection: Arc<Connection>,
     receipt_awaiter: Arc<ReceiptAwaiter>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
 }
 
-impl InnerClient {
+impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
 

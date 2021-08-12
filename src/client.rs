@@ -1,4 +1,4 @@
-mod inner;
+mod internal;
 mod receipt_awaiter;
 
 use tokio::sync::mpsc::Sender;
@@ -8,7 +8,7 @@ use crate::protocol::{StompMessage, ServerCommand, Frame};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 use std::sync::Arc;
-use crate::client::inner::InnerClient;
+use crate::client::internal::InternalClient;
 
 type ReceiptId = String;
 type SubscriberId = String;
@@ -16,11 +16,11 @@ type ServerStompSender = Sender<StompMessage<ServerCommand>>;
 
 pub struct Transaction {
     transaction_id: String,
-    inner_client: Arc<InnerClient>,
+    inner_client: Arc<InternalClient>,
 }
 
 impl Transaction {
-    fn new(transaction_id: String, inner_client: Arc<InnerClient>) -> Self {
+    fn new(transaction_id: String, inner_client: Arc<InternalClient>) -> Self {
         Self {
             transaction_id,
             inner_client,
@@ -70,7 +70,7 @@ impl Transaction {
 }
 
 pub struct Client {
-    inner_client: Arc<InnerClient>,
+    inner_client: Arc<InternalClient>,
 }
 
 pub struct ClientBuilder {
@@ -110,7 +110,7 @@ impl Error for ClientError {}
 
 impl Client {
     pub async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
-        let inner_client = InnerClient::connect(builder).await?;
+        let inner_client = InternalClient::connect(builder).await?;
 
         Ok(
             Self {
