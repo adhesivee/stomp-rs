@@ -29,7 +29,7 @@ async fn test_wrong_connect_response() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_millis(10)).await;
     let host = format!("127.0.0.1:{}", local_port);
 
     let client = Client::connect(
@@ -78,7 +78,7 @@ async fn test_proper_connection() -> Result<(), Box<dyn Error>> {
     });
 
 
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_millis(10)).await;
     let host = format!("127.0.0.1:{}", local_port);
 
     Client::connect(ClientBuilder::new(host))
@@ -143,7 +143,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
     });
 
 
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_millis(10)).await;
     let host = format!("127.0.0.1:{}", local_port);
 
     let client = Client::connect(ClientBuilder::new(host))
