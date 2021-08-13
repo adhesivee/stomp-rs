@@ -13,7 +13,8 @@ use std::error::Error;
 #[derive(Debug)]
 pub enum ClosingReason {
     ParseError(ParseError),
-    ConnectionError(std::io::Error)
+    ConnectionError(std::io::Error),
+    Shutdown
 }
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ impl Error for ConnectionError {}
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
+    server_Sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
     close_sender: Sender<()>,
     is_closed: Arc<Mutex<bool>>,
 }
@@ -46,6 +48,13 @@ impl Connection {
         let inner_close_sender = close_sender.clone();
         let is_closed = Arc::new(Mutex::new(false));
         let inner_is_closed = Arc::clone(&is_closed);
+
+        let connection = Self {
+            client_sender: sender,
+            server_Sender: server_sender.clone(),
+            close_sender,
+            is_closed,
+        };
 
         tokio::spawn(async move {
             let mut msg = vec![0; 8096];
@@ -110,11 +119,7 @@ impl Connection {
         });
 
 
-        Connection {
-            client_sender: sender,
-            close_sender,
-            is_closed,
-        }
+        connection
     }
 
     pub async fn is_closed(&self) -> bool {
@@ -135,6 +140,7 @@ impl Connection {
     }
 
     pub async fn close(&self) {
+        self.server_Sender.send(Err(ConnectionError::Closing(ClosingReason::Shutdown)));
         self.close_sender.send(()).await;
     }
 }
