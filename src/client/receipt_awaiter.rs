@@ -1,20 +1,17 @@
 use async_trait::async_trait;
-use std::sync::Arc;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 use crate::client::{ReceiptId, ServerStompSender, ServerStompReceiver, ClientError};
 use std::error::Error;
 use crate::protocol::{Frame, ServerCommand, StompMessage, ClientCommand};
-use tokio::sync::mpsc::error::SendError;
 use crate::client::interceptor::Interceptor;
 use log::debug;
-use std::hash::Hash;
 use tokio::sync::mpsc::channel;
 use tokio::time::{Instant, Duration};
 
 pub(crate) struct ReceiptAwaiter {
-    pending_senders: Arc<Mutex<HashMap<ReceiptId, ServerStompSender>>>,
-    pending_receivers: Arc<Mutex<HashMap<ReceiptId, ServerStompReceiver>>>
+    pending_senders: Mutex<HashMap<ReceiptId, ServerStompSender>>,
+    pending_receivers: Mutex<HashMap<ReceiptId, ServerStompReceiver>>
 }
 
 #[async_trait]
@@ -50,13 +47,13 @@ impl Interceptor for ReceiptAwaiter {
                         Ok(Some(StompMessage::Frame(val))) => {
                             match val.command {
                                 ServerCommand::Receipt => {
-                                    self.cleanup(receipt);
+                                    self.cleanup(receipt).await;
                                     return Ok(());
                                 }
                                 ServerCommand::Error => {
                                     // @TODO: Include frame in error
-                                    self.cleanup(receipt);
-                                    return Err(Box::new(ClientError::Nack(format!("Error receipt for receipt"))));
+                                    self.cleanup(receipt).await;
+                                    return Err(Box::new(ClientError::Nack("Error receipt for receipt".to_string())));
                                 }
                                 _ => { /* non-relevant frame */ }
                             }
@@ -66,7 +63,7 @@ impl Interceptor for ReceiptAwaiter {
                     }
 
                     if start.elapsed().as_millis() > 2000 {
-                        self.cleanup(receipt);
+                        self.cleanup(receipt).await;
                         return Err(Box::new(ClientError::ReceiptTimeout("".to_owned())));
                     }
                 }
@@ -85,13 +82,17 @@ impl Interceptor for ReceiptAwaiter {
         }
         Ok(frame)
     }
+
+    async fn after_dispatch(&self, _: &Frame<ServerCommand>) -> Result<(), Box<dyn Error>> {
+        Ok(())
+    }
 }
 
 impl ReceiptAwaiter {
     pub(crate) fn new() -> Self {
         Self {
-            pending_senders: Arc::new(Default::default()),
-            pending_receivers: Arc::new(Default::default())
+            pending_senders: Default::default(),
+            pending_receivers: Default::default()
         }
     }
 

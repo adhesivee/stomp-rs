@@ -7,6 +7,21 @@ use crate::protocol::BNF_LF;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use log::debug;
+use std::fmt::{Display, Formatter};
+use std::error::Error;
+
+
+#[derive(Debug)]
+pub enum ConnectionError {
+}
+
+impl Display for ConnectionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Client error")
+    }
+}
+
+impl Error for ConnectionError {}
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
@@ -17,7 +32,7 @@ pub struct Connection {
 impl Connection {
     pub async fn new(
         mut tcp_stream: TcpStream,
-        server_sender: Sender<StompMessage<ServerCommand>>,
+        server_sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
     ) -> Self {
         let (sender, mut receiver) = channel(5);
 
@@ -51,7 +66,7 @@ impl Connection {
                                     Ok(messages) => {
                                         for message in messages {
                                             debug!("Message received {:?}", message.clone());
-                                            server_sender.send(message).await.unwrap();
+                                            server_sender.send(Ok(message)).await.unwrap();
                                         }
                                     }
                                     Err(e) => {

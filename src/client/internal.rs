@@ -3,8 +3,8 @@ use std::error::Error;
 use crate::protocol::{StompMessage, ServerCommand, Frame, ClientCommand};
 use crate::protocol::frame::{Unsubscribe, Connect, Subscribe, Send, Ack, Nack};
 use tokio::time::{Instant, Duration};
-use tokio::sync::mpsc::{channel, Sender, Receiver};
-use crate::client::{ClientError, ServerStompSender, SubscriberId, ReceiptId, ClientBuilder};
+use tokio::sync::mpsc::{channel, Sender};
+use crate::client::{ClientError, ServerStompSender, SubscriberId, ClientBuilder};
 use std::sync::Arc;
 use crate::connection::Connection;
 use tokio::sync::Mutex;
@@ -18,21 +18,24 @@ use std::marker::Send as MarkerSend;
 pub(crate) struct InternalClient {
     pub(crate) connection: Arc<Connection>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
-    interceptors: Arc<Vec<Box<dyn Interceptor + Sync + MarkerSend>>>
+    interceptors: Arc<Vec<Box<dyn Interceptor + Sync + MarkerSend>>>,
 }
 
 impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
 
-        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> = Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
+        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> = Arc::new(
+            vec![Box::new(ReceiptAwaiter::new())]
+        );
+
         let client = Self {
             connection: Arc::new(Connection::new(
                 TcpStream::connect(builder.host.clone()).await?,
                 sender,
             ).await),
             subscribers: Arc::new(Default::default()),
-            interceptors: Arc::clone(&interceptors)
+            interceptors: Arc::clone(&interceptors),
         };
 
         let subscribers = Arc::clone(&client.subscribers);
@@ -60,34 +63,42 @@ impl InternalClient {
 
                 if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
                     match message {
-                        Some(StompMessage::Frame(mut frame)) => {
-                            debug!("Frame received: {:?}", frame.clone());
-                            last_heartbeat = Instant::now();
+                        Some(Ok(message)) => {
+                            match message {
+                                StompMessage::Frame(mut frame) => {
+                                    debug!("Frame received: {:?}", frame.clone());
+                                    last_heartbeat = Instant::now();
 
-                            for interceptor in interceptors.iter() {
-                                frame = interceptor.before_dispatch(frame).await.unwrap();
-                            }
+                                    for interceptor in interceptors.iter() {
+                                        frame = interceptor.before_dispatch(frame).await.unwrap();
+                                    }
 
-                            if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {
-                                connected_sender.take()
-                                    .unwrap()
-                                    .send(frame.clone()).unwrap();
-                            }
+                                    if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {
+                                        connected_sender.take()
+                                            .unwrap()
+                                            .send(frame.clone()).unwrap();
+                                    }
 
-                            if let Some(subscription) = frame.headers.get("subscription") {
-                                let lock = subscribers.lock().await;
-                                if let Some(sub_sender) = lock.get(subscription) {
-                                    sub_sender.send(StompMessage::Frame(frame.clone())).await;
+                                    if let Some(subscription) = frame.headers.get("subscription") {
+                                        let lock = subscribers.lock().await;
+                                        if let Some(sub_sender) = lock.get(subscription) {
+                                            sub_sender.send(StompMessage::Frame(frame.clone())).await;
+                                        }
+                                        drop(lock);
+                                    }
+
+                                    for interceptor in interceptors.iter() {
+                                        interceptor.after_dispatch(&frame)
+                                            .await;
+                                    }
                                 }
-                                drop(lock);
-                            }
-
-                            for interceptor in interceptors.iter() {
-                                interceptor.after_dispatch(&frame);
+                                StompMessage::Ping => {
+                                    last_heartbeat = Instant::now()
+                                }
                             }
                         }
-                        Some(StompMessage::Ping) => {
-                            last_heartbeat = Instant::now()
+                        Some(Err(_err)) => {
+                            break;
                         }
                         None => {
                             break;
@@ -106,7 +117,7 @@ impl InternalClient {
         client.emit(connect_frame.into()).await?;
         let first_frame = connected_receiver.await?;
 
-        if let ServerCommand::Connected = first_frame.command{
+        if let ServerCommand::Connected = first_frame.command {
             Ok(client)
         } else {
             // @TODO: Include close reason
@@ -167,24 +178,16 @@ impl InternalClient {
     }
 
     pub(crate) async fn emit(&self, mut frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
-        let receipt = frame.headers.get("receipt").cloned();
+        for interceptor in self.interceptors.iter() {
+            frame = interceptor.before_emit(frame)
+                .await?;
+        }
 
-        if let Some(receipt) = receipt {
-            // let (sender, receiver) = channel(1);
+        self.connection.emit(frame.clone()).await?;
 
-            for interceptor in self.interceptors.iter() {
-                frame = interceptor.before_emit(frame)
-                    .await?;
-            }
-
-            self.connection.emit(frame.clone()).await?;
-
-            for interceptor in self.interceptors.iter() {
-                interceptor.after_emit(&frame)
-                    .await?
-            }
-        } else {
-            self.connection.emit(frame).await?;
+        for interceptor in self.interceptors.iter() {
+            interceptor.after_emit(&frame)
+                .await?
         }
 
         Ok(())
