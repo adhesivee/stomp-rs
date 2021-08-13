@@ -1,4 +1,4 @@
-use crate::protocol::{FrameParser, ServerCommand, StompMessage, ClientCommand, Frame};
+use crate::protocol::{FrameParser, ServerCommand, StompMessage, ClientCommand, Frame, ParseError};
 use tokio::sync::mpsc::{Sender, channel};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
@@ -10,9 +10,15 @@ use log::debug;
 use std::fmt::{Display, Formatter};
 use std::error::Error;
 
+#[derive(Debug)]
+pub enum ClosingReason {
+    ParseError(ParseError),
+    ConnectionError(std::io::Error)
+}
 
 #[derive(Debug)]
 pub enum ConnectionError {
+    Closing(ClosingReason)
 }
 
 impl Display for ConnectionError {
@@ -70,8 +76,8 @@ impl Connection {
                                         }
                                     }
                                     Err(e) => {
-                                        // @TODO: Report cause
                                         debug!("Parsing error, closing {:?}", e);
+                                        server_sender.send(Err(ConnectionError::Closing(ClosingReason::ParseError(e))));
                                         inner_close_sender.send(()).await.unwrap();
                                         closing = true;
                                     }
@@ -79,8 +85,8 @@ impl Connection {
                             }
                             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
                             Err(e) => {
-                                // @TODO: report cause
                                 debug!("Connection error, closing {:?}", e);
+                                server_sender.send(Err(ConnectionError::Closing(ClosingReason::ConnectionError(e))));
                                 inner_close_sender.send(()).await.unwrap();
                                 closing = true;
                             }

@@ -97,7 +97,7 @@ impl InternalClient {
                                 }
                             }
                         }
-                        Some(Err(_err)) => {
+                        Some(Err(_)) => {
                             break;
                         }
                         None => {
