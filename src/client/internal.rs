@@ -33,22 +33,15 @@ impl InternalClient {
                 Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
             ),
             subscribers: Arc::new(Default::default()),
-            interceptors: Arc::clone(&interceptors),
+            interceptors,
         };
 
-        let subscribers = Arc::clone(&client.subscribers);
         let server_timeout: u128 = builder.heartbeat.unwrap_or((0, 0)).1.into();
 
         let (connected_sender, connected_receiver) = tokio::sync::oneshot::channel();
 
         client
-            .spawn_server_frame_listener(
-                connected_sender,
-                receiver,
-                server_timeout,
-                interceptors,
-                subscribers,
-            )
+            .spawn_server_frame_listener(connected_sender, receiver, server_timeout)
             .await;
 
         let mut connect_frame = Connect::new("1.2".to_owned(), builder.host);
@@ -75,10 +68,10 @@ impl InternalClient {
         connected_sender: tokio::sync::oneshot::Sender<Frame<ServerCommand>>,
         mut receiver: Receiver<Result<StompMessage<ServerCommand>, ConnectionError>>,
         server_timeout: u128,
-        interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>>,
-        subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
     ) {
-        let connection = self.connection.clone();
+        let connection = Arc::clone(&self.connection.clone());
+        let interceptors = Arc::clone(&self.interceptors);
+        let subscribers = Arc::clone(&self.subscribers);
 
         tokio::spawn(async move {
             let mut last_heartbeat = Instant::now();
