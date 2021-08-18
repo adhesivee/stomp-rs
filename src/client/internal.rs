@@ -1,7 +1,7 @@
 use crate::client::interceptor::Interceptor;
 use crate::client::receipt_awaiter::ReceiptAwaiter;
 use crate::client::{ClientBuilder, ClientError, ServerStompSender, SubscriberId};
-use crate::connection::Connection;
+use crate::connection::{Connection, ConnectionError};
 use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe, Unsubscribe};
 use crate::protocol::{ClientCommand, Frame, ServerCommand, StompMessage};
 use log::debug;
@@ -10,13 +10,13 @@ use std::error::Error;
 use std::marker::Send as MarkerSend;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub(crate) struct InternalClient {
-    pub(crate) connection: Arc<Connection>,
+    connection: Arc<Connection>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
     interceptors: Arc<Vec<Box<dyn Interceptor + Sync + MarkerSend>>>,
 }
@@ -38,9 +38,48 @@ impl InternalClient {
 
         let subscribers = Arc::clone(&client.subscribers);
         let server_timeout: u128 = builder.heartbeat.unwrap_or((0, 0)).1.into();
-        let connection = client.connection.clone();
 
         let (connected_sender, connected_receiver) = tokio::sync::oneshot::channel();
+
+        client
+            .spawn_server_frame_listener(
+                connected_sender,
+                receiver,
+                server_timeout,
+                interceptors,
+                subscribers,
+            )
+            .await;
+
+        let mut connect_frame = Connect::new("1.2".to_owned(), builder.host);
+
+        if let Some(heartbeat) = builder.heartbeat {
+            connect_frame = connect_frame.heartbeat(heartbeat.0, heartbeat.1);
+        }
+
+        client.emit(connect_frame.into()).await?;
+        let first_frame = connected_receiver.await?;
+
+        if let ServerCommand::Connected = first_frame.command {
+            Ok(client)
+        } else {
+            // @TODO: Include close reason
+            client.connection.close().await;
+
+            Err(Box::new(ClientError::ConnectionError(None)))
+        }
+    }
+
+    async fn spawn_server_frame_listener(
+        &self,
+        connected_sender: tokio::sync::oneshot::Sender<Frame<ServerCommand>>,
+        mut receiver: Receiver<Result<StompMessage<ServerCommand>, ConnectionError>>,
+        server_timeout: u128,
+        interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>>,
+        subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
+    ) {
+        let connection = self.connection.clone();
+
         tokio::spawn(async move {
             let mut last_heartbeat = Instant::now();
 
@@ -105,24 +144,6 @@ impl InternalClient {
                 }
             }
         });
-
-        let mut connect_frame = Connect::new("1.2".to_owned(), builder.host);
-
-        if let Some(heartbeat) = builder.heartbeat {
-            connect_frame = connect_frame.heartbeat(heartbeat.0, heartbeat.1);
-        }
-
-        client.emit(connect_frame.into()).await?;
-        let first_frame = connected_receiver.await?;
-
-        if let ServerCommand::Connected = first_frame.command {
-            Ok(client)
-        } else {
-            // @TODO: Include close reason
-            client.connection.close().await;
-
-            Err(Box::new(ClientError::ConnectionError(None)))
-        }
     }
 
     pub(crate) async fn subscribe(
