@@ -31,7 +31,7 @@ impl Transaction {
 
     pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
         self.inner_client
-            .send(send.header("transaction".to_string(), self.transaction_id.clone()))
+            .send(send.header("transaction", self.transaction_id.clone()))
             .await
     }
 

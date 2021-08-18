@@ -52,7 +52,7 @@ default_frame!(Connect(accept_version, host) => );
 impl Connect {
     pub fn heartbeat(self, client_interval: u32, server_interval: u32) -> Self {
         self.header(
-            "heart-beat".to_string(),
+            "heart-beat",
             format!("{},{}", client_interval, server_interval),
         )
     }
@@ -82,7 +82,7 @@ impl Send {
     }
 
     pub fn receipt<A: Into<String>>(self, receipt_id: A) -> Self {
-        self.header("receipt".to_string(), receipt_id)
+        self.header("receipt", receipt_id)
     }
 
     pub fn header<A: Into<String>, B: Into<String>>(mut self, key: A, value: B) -> Self {
