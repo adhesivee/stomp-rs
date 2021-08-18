@@ -39,6 +39,37 @@ async fn test_wrong_connect_response() -> Result<(), Box<dyn Error>> {
 }
 
 #[tokio::test]
+async fn test_heartbeat_closing_client() -> Result<(), Box<dyn Error>> {
+    SimpleLogger::new().with_level(LevelFilter::Debug).init();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let local_port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            debug!("Wait for writeable");
+            socket.writable().await.unwrap();
+
+            sleep(Duration::from_secs(5)).await;
+        }
+    });
+
+    sleep(Duration::from_millis(10)).await;
+    let host = format!("127.0.0.1:{}", local_port);
+
+    let started = Instant::now();
+    let client = Client::connect(
+        ClientBuilder::new(host)
+            .heartbeat(500, 500)
+    ).await;
+
+    assert!(client.is_err());
+    assert!(started.elapsed().as_millis() < 1000);
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_proper_connection() -> Result<(), Box<dyn Error>> {
     SimpleLogger::new().with_level(LevelFilter::Debug).init();
 
@@ -66,7 +97,7 @@ async fn test_proper_connection() -> Result<(), Box<dyn Error>> {
                                             headers: Default::default(),
                                             body: "".to_string(),
                                         }
-                                        .to_bytes(),
+                                            .to_bytes(),
                                     )
                                     .await
                                     .unwrap();
@@ -116,7 +147,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
                                                 headers: Default::default(),
                                                 body: "".to_string(),
                                             }
-                                            .to_bytes(),
+                                                .to_bytes(),
                                         )
                                         .await
                                         .unwrap();
@@ -139,7 +170,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
                                                 headers,
                                                 body: "".to_string(),
                                             }
-                                            .to_bytes(),
+                                                .to_bytes(),
                                         )
                                         .await;
                                 }
