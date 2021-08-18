@@ -59,10 +59,7 @@ async fn test_heartbeat_closing_client() -> Result<(), Box<dyn Error>> {
     let host = format!("127.0.0.1:{}", local_port);
 
     let started = Instant::now();
-    let client = Client::connect(
-        ClientBuilder::new(host)
-            .heartbeat(500, 500)
-    ).await;
+    let client = Client::connect(ClientBuilder::new(host).heartbeat(500, 500)).await;
 
     assert!(client.is_err());
     assert!(started.elapsed().as_millis() < 1000);
@@ -97,7 +94,7 @@ async fn test_proper_connection() -> Result<(), Box<dyn Error>> {
                                             headers: Default::default(),
                                             body: "".to_string(),
                                         }
-                                            .to_bytes(),
+                                        .to_bytes(),
                                     )
                                     .await
                                     .unwrap();
@@ -147,7 +144,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
                                                 headers: Default::default(),
                                                 body: "".to_string(),
                                             }
-                                                .to_bytes(),
+                                            .to_bytes(),
                                         )
                                         .await
                                         .unwrap();
@@ -170,7 +167,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
                                                 headers,
                                                 body: "".to_string(),
                                             }
-                                                .to_bytes(),
+                                            .to_bytes(),
                                         )
                                         .await;
                                 }
