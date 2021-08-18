@@ -1,25 +1,25 @@
-use crate::protocol::{FrameParser, ServerCommand, StompMessage, ClientCommand, Frame, ParseError};
-use tokio::sync::mpsc::{Sender, channel};
+use crate::protocol::BNF_LF;
+use crate::protocol::{ClientCommand, Frame, FrameParser, ParseError, ServerCommand, StompMessage};
+use log::debug;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ErrorKind};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
-use tokio::io::{ErrorKind, AsyncWriteExt, AsyncReadExt};
-use crate::protocol::BNF_LF;
-use std::sync::Arc;
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::Mutex;
-use log::debug;
-use std::fmt::{Display, Formatter};
-use std::error::Error;
 
 #[derive(Debug)]
 pub enum ClosingReason {
     ParseError(ParseError),
     ConnectionError(std::io::Error),
-    Shutdown
+    Shutdown,
 }
 
 #[derive(Debug)]
 pub enum ConnectionError {
-    Closing(ClosingReason)
+    Closing(ClosingReason),
 }
 
 impl Display for ConnectionError {
@@ -60,7 +60,6 @@ impl Connection {
             let mut msg = vec![0; 8096];
             let mut parser: FrameParser<ServerCommand> = FrameParser::new();
             let mut closing = false;
-
 
             loop {
                 tokio::select! {
@@ -113,34 +112,32 @@ impl Connection {
                         *guard = true;
                         break;
                     }
-                }
-                ;
+                };
             }
         });
-
 
         connection
     }
 
     pub async fn is_closed(&self) -> bool {
-        *self.is_closed
-            .lock()
-            .await
+        *self.is_closed.lock().await
     }
-    pub async fn emit<T: Into<Frame<ClientCommand>>>(&self, frame: T) -> Result<(), SendError<StompMessage<ClientCommand>>> {
+    pub async fn emit<T: Into<Frame<ClientCommand>>>(
+        &self,
+        frame: T,
+    ) -> Result<(), SendError<StompMessage<ClientCommand>>> {
         self.client_sender
             .send(StompMessage::Frame(frame.into()))
             .await
     }
 
     pub async fn heartbeat(&self) -> Result<(), SendError<StompMessage<ClientCommand>>> {
-        self.client_sender
-            .send(StompMessage::Ping)
-            .await
+        self.client_sender.send(StompMessage::Ping).await
     }
 
     pub async fn close(&self) {
-        self.server_Sender.send(Err(ConnectionError::Closing(ClosingReason::Shutdown)));
+        self.server_Sender
+            .send(Err(ConnectionError::Closing(ClosingReason::Shutdown)));
         self.close_sender.send(()).await;
     }
 }

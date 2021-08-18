@@ -1,19 +1,19 @@
-use uuid::Uuid;
-use std::error::Error;
-use crate::protocol::{StompMessage, ServerCommand, Frame, ClientCommand};
-use crate::protocol::frame::{Unsubscribe, Connect, Subscribe, Send, Ack, Nack};
-use tokio::time::{Instant, Duration};
-use tokio::sync::mpsc::{channel, Sender};
-use crate::client::{ClientError, ServerStompSender, SubscriberId, ClientBuilder};
-use std::sync::Arc;
-use crate::connection::Connection;
-use tokio::sync::Mutex;
-use std::collections::HashMap;
-use tokio::net::TcpStream;
-use log::debug;
-use crate::client::receipt_awaiter::ReceiptAwaiter;
 use crate::client::interceptor::Interceptor;
+use crate::client::receipt_awaiter::ReceiptAwaiter;
+use crate::client::{ClientBuilder, ClientError, ServerStompSender, SubscriberId};
+use crate::connection::Connection;
+use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe, Unsubscribe};
+use crate::protocol::{ClientCommand, Frame, ServerCommand, StompMessage};
+use log::debug;
+use std::collections::HashMap;
+use std::error::Error;
 use std::marker::Send as MarkerSend;
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, Instant};
+use uuid::Uuid;
 
 pub(crate) struct InternalClient {
     pub(crate) connection: Arc<Connection>,
@@ -25,15 +25,13 @@ impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, mut receiver) = channel(5);
 
-        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> = Arc::new(
-            vec![Box::new(ReceiptAwaiter::new())]
-        );
+        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> =
+            Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
 
         let client = Self {
-            connection: Arc::new(Connection::new(
-                TcpStream::connect(builder.host.clone()).await?,
-                sender,
-            ).await),
+            connection: Arc::new(
+                Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
+            ),
             subscribers: Arc::new(Default::default()),
             interceptors: Arc::clone(&interceptors),
         };
@@ -55,48 +53,48 @@ impl InternalClient {
                 }
 
                 if server_timeout > 0 && last_heartbeat.elapsed().as_millis() > server_timeout {
-                    connection
-                        .clone()
-                        .close()
-                        .await;
+                    connection.clone().close().await;
                 }
 
-                if let Ok(message) = tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await {
+                if let Ok(message) =
+                    tokio::time::timeout(Duration::from_millis(100), receiver.recv()).await
+                {
                     match message {
-                        Some(Ok(message)) => {
-                            match message {
-                                StompMessage::Frame(mut frame) => {
-                                    debug!("Frame received: {:?}", frame.clone());
-                                    last_heartbeat = Instant::now();
+                        Some(Ok(message)) => match message {
+                            StompMessage::Frame(mut frame) => {
+                                debug!("Frame received: {:?}", frame.clone());
+                                last_heartbeat = Instant::now();
 
-                                    for interceptor in interceptors.iter() {
-                                        frame = interceptor.before_dispatch(frame).await.unwrap();
-                                    }
-
-                                    if !connected_sender.as_ref().map(|val| val.is_closed()).unwrap_or_else(|| true) {
-                                        connected_sender.take()
-                                            .unwrap()
-                                            .send(frame.clone()).unwrap();
-                                    }
-
-                                    if let Some(subscription) = frame.headers.get("subscription") {
-                                        let lock = subscribers.lock().await;
-                                        if let Some(sub_sender) = lock.get(subscription) {
-                                            sub_sender.send(StompMessage::Frame(frame.clone())).await;
-                                        }
-                                        drop(lock);
-                                    }
-
-                                    for interceptor in interceptors.iter() {
-                                        interceptor.after_dispatch(&frame)
-                                            .await;
-                                    }
+                                for interceptor in interceptors.iter() {
+                                    frame = interceptor.before_dispatch(frame).await.unwrap();
                                 }
-                                StompMessage::Ping => {
-                                    last_heartbeat = Instant::now()
+
+                                if !connected_sender
+                                    .as_ref()
+                                    .map(|val| val.is_closed())
+                                    .unwrap_or_else(|| true)
+                                {
+                                    connected_sender
+                                        .take()
+                                        .unwrap()
+                                        .send(frame.clone())
+                                        .unwrap();
+                                }
+
+                                if let Some(subscription) = frame.headers.get("subscription") {
+                                    let lock = subscribers.lock().await;
+                                    if let Some(sub_sender) = lock.get(subscription) {
+                                        sub_sender.send(StompMessage::Frame(frame.clone())).await;
+                                    }
+                                    drop(lock);
+                                }
+
+                                for interceptor in interceptors.iter() {
+                                    interceptor.after_dispatch(&frame).await;
                                 }
                             }
-                        }
+                            StompMessage::Ping => last_heartbeat = Instant::now(),
+                        },
                         Some(Err(_)) => {
                             break;
                         }
@@ -127,15 +125,17 @@ impl InternalClient {
         }
     }
 
-    pub(crate) async fn subscribe(&self, subscribe: Subscribe, sender: Sender<Frame<ServerCommand>>) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn subscribe(
+        &self,
+        subscribe: Subscribe,
+        sender: Sender<Frame<ServerCommand>>,
+    ) -> Result<(), Box<dyn Error>> {
         let destination = subscribe.headers["destination"].clone();
         let subscriber_id = subscribe.headers["id"].clone();
         let receipt_id = Uuid::new_v4();
 
-        self.emit(
-            subscribe.receipt(receipt_id.to_string())
-                .into()
-        ).await?;
+        self.emit(subscribe.receipt(receipt_id.to_string()).into())
+            .await?;
 
         let sub_connection = Arc::clone(&self.connection);
 
@@ -151,17 +151,19 @@ impl InternalClient {
                 if let StompMessage::Frame(frame) = message {
                     let destination_header = frame.headers.get("destination");
 
-                    if destination_header.is_some() && destination_header.unwrap() == &destination &&
-                        sender.send(frame).await.is_err()
+                    if destination_header.is_some()
+                        && destination_header.unwrap() == &destination
+                        && sender.send(frame).await.is_err()
                     {
                         break;
                     }
                 }
             }
 
-            sub_connection.emit(
-                Unsubscribe::new(subscriber_id.to_string())
-            ).await.unwrap();
+            sub_connection
+                .emit(Unsubscribe::new(subscriber_id.to_string()))
+                .await
+                .unwrap();
         });
         Ok(())
     }
@@ -169,41 +171,33 @@ impl InternalClient {
     pub(crate) async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
         let receipt_id = Uuid::new_v4();
 
-        self.emit(
-            send.receipt(receipt_id.to_string())
-                .into()
-        ).await?;
+        self.emit(send.receipt(receipt_id.to_string()).into())
+            .await?;
 
         Ok(())
     }
 
     pub(crate) async fn emit(&self, mut frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
         for interceptor in self.interceptors.iter() {
-            frame = interceptor.before_emit(frame)
-                .await?;
+            frame = interceptor.before_emit(frame).await?;
         }
 
         self.connection.emit(frame.clone()).await?;
 
         for interceptor in self.interceptors.iter() {
-            interceptor.after_emit(&frame)
-                .await?
+            interceptor.after_emit(&frame).await?
         }
 
         Ok(())
     }
 
     pub(crate) async fn ack(&self, ack: Ack) -> Result<(), Box<dyn Error>> {
-        self.emit(
-            ack.receipt(Uuid::new_v4().to_string())
-                .into()
-        ).await
+        self.emit(ack.receipt(Uuid::new_v4().to_string()).into())
+            .await
     }
 
     pub(crate) async fn nack(&self, nack: Nack) -> Result<(), Box<dyn Error>> {
-        self.emit(
-            nack.receipt(Uuid::new_v4().to_string())
-                .into()
-        ).await
+        self.emit(nack.receipt(Uuid::new_v4().to_string()).into())
+            .await
     }
 }

@@ -1,22 +1,25 @@
-use async_trait::async_trait;
-use tokio::sync::Mutex;
-use std::collections::HashMap;
-use crate::client::{ReceiptId, ServerStompSender, ServerStompReceiver, ClientError};
-use std::error::Error;
-use crate::protocol::{Frame, ServerCommand, StompMessage, ClientCommand};
 use crate::client::interceptor::Interceptor;
+use crate::client::{ClientError, ReceiptId, ServerStompReceiver, ServerStompSender};
+use crate::protocol::{ClientCommand, Frame, ServerCommand, StompMessage};
+use async_trait::async_trait;
 use log::debug;
+use std::collections::HashMap;
+use std::error::Error;
 use tokio::sync::mpsc::channel;
-use tokio::time::{Instant, Duration};
+use tokio::sync::Mutex;
+use tokio::time::{Duration, Instant};
 
 pub(crate) struct ReceiptAwaiter {
     pending_senders: Mutex<HashMap<ReceiptId, ServerStompSender>>,
-    pending_receivers: Mutex<HashMap<ReceiptId, ServerStompReceiver>>
+    pending_receivers: Mutex<HashMap<ReceiptId, ServerStompReceiver>>,
 }
 
 #[async_trait]
 impl Interceptor for ReceiptAwaiter {
-    async fn before_emit(&self, frame: Frame<ClientCommand>) -> Result<Frame<ClientCommand>, Box<dyn Error>> {
+    async fn before_emit(
+        &self,
+        frame: Frame<ClientCommand>,
+    ) -> Result<Frame<ClientCommand>, Box<dyn Error>> {
         if let Some(receipt) = frame.headers.get("receipt") {
             debug!("Register receipt {}", receipt);
             let (sender, receiver) = channel(1);
@@ -38,12 +41,13 @@ impl Interceptor for ReceiptAwaiter {
             let server_receiver = guard.remove(receipt);
             drop(guard);
 
-
             if let Some(mut receipt_receiver) = server_receiver {
                 let start = Instant::now();
 
                 loop {
-                    match tokio::time::timeout(Duration::from_millis(10), receipt_receiver.recv()).await {
+                    match tokio::time::timeout(Duration::from_millis(10), receipt_receiver.recv())
+                        .await
+                    {
                         Ok(Some(StompMessage::Frame(val))) => {
                             match val.command {
                                 ServerCommand::Receipt => {
@@ -53,7 +57,9 @@ impl Interceptor for ReceiptAwaiter {
                                 ServerCommand::Error => {
                                     // @TODO: Include frame in error
                                     self.cleanup(receipt).await;
-                                    return Err(Box::new(ClientError::Nack("Error receipt for receipt".to_string())));
+                                    return Err(Box::new(ClientError::Nack(
+                                        "Error receipt for receipt".to_string(),
+                                    )));
                                 }
                                 _ => { /* non-relevant frame */ }
                             }
@@ -73,11 +79,16 @@ impl Interceptor for ReceiptAwaiter {
         Ok(())
     }
 
-    async fn before_dispatch(&self, frame: Frame<ServerCommand>) -> Result<Frame<ServerCommand>, Box<dyn Error>> {
+    async fn before_dispatch(
+        &self,
+        frame: Frame<ServerCommand>,
+    ) -> Result<Frame<ServerCommand>, Box<dyn Error>> {
         if let Some(receipt_id) = frame.headers.get("receipt-id") {
             let mut lock = self.pending_senders.lock().await;
             if let Some(pending_sender) = lock.remove(receipt_id) {
-                pending_sender.send(StompMessage::Frame(frame.clone())).await;
+                pending_sender
+                    .send(StompMessage::Frame(frame.clone()))
+                    .await;
             };
         }
         Ok(frame)
@@ -92,7 +103,7 @@ impl ReceiptAwaiter {
     pub(crate) fn new() -> Self {
         Self {
             pending_senders: Default::default(),
-            pending_receivers: Default::default()
+            pending_receivers: Default::default(),
         }
     }
 

@@ -33,7 +33,7 @@ impl From<ServerCommand> for &str {
             ServerCommand::Connected => "CONNECTED",
             ServerCommand::Message => "MESSAGE",
             ServerCommand::Receipt => "RECEIPT",
-            ServerCommand::Error => "ERROR"
+            ServerCommand::Error => "ERROR",
         }
     }
 }
@@ -70,7 +70,7 @@ impl TryFrom<&str> for ClientCommand {
             "COMMIT" => Ok(ClientCommand::Commit),
             "ABORT" => Ok(ClientCommand::Abort),
             "DISCONNECT" => Ok(ClientCommand::Disconnect),
-            _ => Err("Unknown client command")
+            _ => Err("Unknown client command"),
         }
     }
 }
@@ -84,7 +84,7 @@ impl TryFrom<&str> for ServerCommand {
             "MESSAGE" => Ok(ServerCommand::Message),
             "RECEIPT" => Ok(ServerCommand::Receipt),
             "ERROR" => Ok(ServerCommand::Error),
-            _ => Err("Unknown client command")
+            _ => Err("Unknown client command"),
         }
     }
 }
@@ -95,28 +95,30 @@ impl Command for ClientCommand {}
 
 #[derive(Debug, Clone)]
 pub struct Frame<T>
-    where T: Into<&'static str> {
+where
+    T: Into<&'static str>,
+{
     pub command: T,
     pub headers: HashMap<String, String>,
     pub body: String,
 }
 
 impl<T> Frame<T>
-    where T: Into<&'static str> + Copy {
+where
+    T: Into<&'static str> + Copy,
+{
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = vec![];
 
         buffer.extend_from_slice(self.command.into().as_bytes());
         buffer.push(BNF_LF);
 
-        self.headers
-            .iter()
-            .for_each(|entry| {
-                buffer.extend_from_slice(entry.0.as_bytes());
-                buffer.extend_from_slice(":".as_bytes());
-                buffer.extend_from_slice(entry.1.as_bytes());
-                buffer.push(BNF_LF)
-            });
+        self.headers.iter().for_each(|entry| {
+            buffer.extend_from_slice(entry.0.as_bytes());
+            buffer.extend_from_slice(":".as_bytes());
+            buffer.extend_from_slice(entry.1.as_bytes());
+            buffer.push(BNF_LF)
+        });
 
         buffer.push(BNF_LF);
         buffer.extend_from_slice(self.body.as_bytes());
@@ -140,7 +142,6 @@ const BNF_CR: u8 = 13;
 
 pub trait Command: Into<&'static str> + for<'a> TryFrom<&'a str> {}
 
-
 pub struct FrameParser<T: Command> {
     buffer: Vec<u8>,
     state: ReadingState,
@@ -157,7 +158,7 @@ pub enum StompMessage<T: Command + Clone> {
 
 #[derive(Debug)]
 pub enum ParseError {
-    CommandNotFound(String)
+    CommandNotFound(String),
 }
 
 impl Display for ParseError {
@@ -188,19 +189,21 @@ impl<T: Command + Clone> FrameParser<T> {
                 ReadingState::Command => BNF_LF,
                 ReadingState::Header => BNF_LF,
                 ReadingState::Body => BNF_NULL,
-                ReadingState::Completed => BNF_LF
+                ReadingState::Completed => BNF_LF,
             };
 
-            let position = &body_slice.iter()
-                .position(|b| *b == collect_until);
+            let position = &body_slice.iter().position(|b| *b == collect_until);
 
             match position {
                 Some(position) => {
                     let previous_position = position.saturating_sub(1_usize);
 
-                    let buffer_until = if collect_until == BNF_LF && body_slice.get(previous_position)
-                        .iter()
-                        .all(|b| **b == BNF_CR) {
+                    let buffer_until = if collect_until == BNF_LF
+                        && body_slice
+                            .get(previous_position)
+                            .iter()
+                            .all(|b| **b == BNF_CR)
+                    {
                         previous_position
                     } else {
                         *position
@@ -224,14 +227,15 @@ impl<T: Command + Clone> FrameParser<T> {
             match self.state {
                 ReadingState::Command => {
                     let buffer = std::mem::take(&mut self.buffer);
-                    let command_string = String::from_utf8(buffer)
-                        .unwrap();
+                    let command_string = String::from_utf8(buffer).unwrap();
 
                     let command = T::try_from(&command_string);
 
                     self.current_command = match command {
                         Ok(value) => Some(value),
-                        Err(_) => { return Err(ParseError::CommandNotFound(command_string.to_string())); }
+                        Err(_) => {
+                            return Err(ParseError::CommandNotFound(command_string.to_string()));
+                        }
                     };
 
                     self.state = ReadingState::Header;
@@ -244,9 +248,10 @@ impl<T: Command + Clone> FrameParser<T> {
                         let buffer = std::mem::take(&mut self.buffer);
                         let header_line = String::from_utf8(buffer).unwrap();
                         let mut header = header_line.split(':');
-                        self.current_headers.as_mut()
-                            .unwrap()
-                            .insert(header.next().unwrap().trim().to_string(), header.next().unwrap().trim().to_string());
+                        self.current_headers.as_mut().unwrap().insert(
+                            header.next().unwrap().trim().to_string(),
+                            header.next().unwrap().trim().to_string(),
+                        );
                     }
                 }
                 ReadingState::Body => {
@@ -258,15 +263,11 @@ impl<T: Command + Clone> FrameParser<T> {
                     let frame_command = std::mem::take(&mut self.current_command);
                     let frame_headers = std::mem::take(&mut self.current_headers);
 
-                    frames.push(
-                        StompMessage::Frame(
-                            Frame {
-                                command: frame_command.unwrap(),
-                                headers: frame_headers.unwrap(),
-                                body,
-                            }
-                        )
-                    );
+                    frames.push(StompMessage::Frame(Frame {
+                        command: frame_command.unwrap(),
+                        headers: frame_headers.unwrap(),
+                        body,
+                    }));
                 }
                 ReadingState::Completed => {
                     frames.push(StompMessage::Ping);
@@ -281,7 +282,7 @@ impl<T: Command + Clone> FrameParser<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::protocol::{FrameParser, StompMessage, ClientCommand};
+    use crate::protocol::{ClientCommand, FrameParser, StompMessage};
 
     #[tokio::test]
     async fn parse_test() {
@@ -298,17 +299,15 @@ mod test {
         \n\
         body : test\n\
         second body\0
-        ".as_bytes();
+        "
+        .as_bytes();
 
         let mut frames = vec![];
         let mut parser: FrameParser<ClientCommand> = FrameParser::new();
 
         for body_chunk in body.chunks(4) {
-            frames.append(
-                &mut parser.parse(body_chunk).unwrap()
-            );
+            frames.append(&mut parser.parse(body_chunk).unwrap());
         }
-
 
         let frame = frames.first();
 
@@ -324,8 +323,11 @@ mod test {
             assert!(headers.contains_key("test_val"));
             assert_eq!(headers.get("test_val").unwrap(), "heeerre");
 
-            assert_eq!(frame.body, "body\n\
-first body");
+            assert_eq!(
+                frame.body,
+                "body\n\
+first body"
+            );
             println!("{:?}", frame);
         }
     }
@@ -345,17 +347,15 @@ first body");
         \n\
         body : test\n\
         second body\0
-        ".as_bytes();
+        "
+        .as_bytes();
 
         let mut frames = vec![];
         let mut parser: FrameParser<ClientCommand> = FrameParser::new();
 
         for body_chunk in body.chunks(4) {
-            frames.append(
-                &mut parser.parse(body_chunk).unwrap()
-            );
+            frames.append(&mut parser.parse(body_chunk).unwrap());
         }
-
 
         let frame = frames.first();
 
@@ -371,8 +371,11 @@ first body");
             assert!(headers.contains_key("test_val"));
             assert_eq!(headers.get("test_val").unwrap(), "heeerre");
 
-            assert_eq!(frame.body, "body\r\n\
-first body");
+            assert_eq!(
+                frame.body,
+                "body\r\n\
+first body"
+            );
             println!("{:?}", frame);
         }
     }

@@ -1,15 +1,15 @@
+mod interceptor;
 mod internal;
 mod receipt_awaiter;
-mod interceptor;
 
-use tokio::sync::mpsc::{Sender, Receiver};
-use crate::protocol::frame::{Subscribe, Send, Begin, Commit, Abort, Ack, Nack};
-use std::error::Error;
-use crate::protocol::{StompMessage, ServerCommand, Frame};
-use std::fmt::{Display, Formatter};
-use uuid::Uuid;
-use std::sync::Arc;
 use crate::client::internal::InternalClient;
+use crate::protocol::frame::{Abort, Ack, Begin, Commit, Nack, Send, Subscribe};
+use crate::protocol::{Frame, ServerCommand, StompMessage};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::sync::Arc;
+use tokio::sync::mpsc::{Receiver, Sender};
+use uuid::Uuid;
 
 type ReceiptId = String;
 type SubscriberId = String;
@@ -30,24 +30,21 @@ impl Transaction {
     }
 
     pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
-        self.inner_client.send(
-            send.header(
-                "transaction".to_string(),
-                self.transaction_id.clone()
-            )
-        ).await
+        self.inner_client
+            .send(send.header("transaction".to_string(), self.transaction_id.clone()))
+            .await
     }
 
     pub async fn ack(&self, ack: Ack) -> Result<(), Box<dyn Error>> {
-        self.inner_client.ack(ack.transaction(
-            self.transaction_id.clone())
-        ).await
+        self.inner_client
+            .ack(ack.transaction(self.transaction_id.clone()))
+            .await
     }
 
     pub async fn nack(&self, nack: Nack) -> Result<(), Box<dyn Error>> {
-        self.inner_client.nack(
-            nack.transaction(self.transaction_id.clone())
-        ).await
+        self.inner_client
+            .nack(nack.transaction(self.transaction_id.clone()))
+            .await
     }
 
     pub async fn commit(&self) -> Result<(), Box<dyn Error>> {
@@ -55,7 +52,7 @@ impl Transaction {
             .emit(
                 Commit::new(self.transaction_id.clone())
                     .receipt(Uuid::new_v4().to_string())
-                    .into()
+                    .into(),
             )
             .await
     }
@@ -65,7 +62,7 @@ impl Transaction {
             .emit(
                 Abort::new(self.transaction_id.clone())
                     .receipt(Uuid::new_v4().to_string())
-                    .into()
+                    .into(),
             )
             .await
     }
@@ -77,14 +74,14 @@ pub struct Client {
 
 pub struct ClientBuilder {
     host: String,
-    heartbeat: Option<(u32, u32)>
+    heartbeat: Option<(u32, u32)>,
 }
 
 impl ClientBuilder {
     pub fn new<A: Into<String>>(host: A) -> Self {
         Self {
             host: host.into(),
-            heartbeat: None
+            heartbeat: None,
         }
     }
 
@@ -114,14 +111,16 @@ impl Client {
     pub async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let inner_client = InternalClient::connect(builder).await?;
 
-        Ok(
-            Self {
-                inner_client: Arc::new(inner_client)
-            }
-        )
+        Ok(Self {
+            inner_client: Arc::new(inner_client),
+        })
     }
 
-    pub async fn subscribe(&self, subscribe: Subscribe, sender: Sender<Frame<ServerCommand>>,) -> Result<(), Box<dyn Error>> {
+    pub async fn subscribe(
+        &self,
+        subscribe: Subscribe,
+        sender: Sender<Frame<ServerCommand>>,
+    ) -> Result<(), Box<dyn Error>> {
         self.inner_client.subscribe(subscribe, sender).await
     }
 
@@ -145,10 +144,9 @@ impl Client {
             .emit(
                 Begin::new(transaction_id.to_string())
                     .receipt(receipt_id.to_string())
-                    .into()
+                    .into(),
             )
-            .await?
-        ;
+            .await?;
 
         Ok(Transaction {
             transaction_id: transaction_id.to_string(),

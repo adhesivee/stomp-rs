@@ -1,4 +1,4 @@
-use crate::protocol::{Frame, ClientCommand};
+use crate::protocol::{ClientCommand, Frame};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -45,21 +45,23 @@ macro_rules! default_frame {
     }
 }
 
-
 default_frame!(Nack(id) => transaction (transaction), receipt(receipt));
 default_frame!(Ack(id) => transaction (transaction), receipt(receipt));
 default_frame!(Connect(accept_version, host) => );
 
 impl Connect {
     pub fn heartbeat(self, client_interval: u32, server_interval: u32) -> Self {
-        self.header("heart-beat".to_string(), format!("{},{}", client_interval, server_interval))
+        self.header(
+            "heart-beat".to_string(),
+            format!("{},{}", client_interval, server_interval),
+        )
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Send {
     headers: HashMap<String, String>,
-    payload: String
+    payload: String,
 }
 
 impl Send {
@@ -67,7 +69,10 @@ impl Send {
         let mut headers = HashMap::new();
         headers.insert("destination".to_string(), destination.into());
 
-        Send { headers, payload: "".to_string() }
+        Send {
+            headers,
+            payload: "".to_string(),
+        }
     }
 
     pub fn body<A: Into<String>>(mut self, payload: A) -> Self {
@@ -92,7 +97,7 @@ impl Into<Frame<ClientCommand>> for Send {
         Frame {
             command: ClientCommand::Send,
             headers: self.headers,
-            body: self.payload
+            body: self.payload,
         }
     }
 }
@@ -112,8 +117,8 @@ default_frame!(Disconnect(transaction) => receipt (receipt));
 
 #[cfg(test)]
 mod tests {
-    use crate::protocol::frame::{Ack, Nack, Connect, Send, Subscribe};
-    use crate::protocol::{Frame, ClientCommand};
+    use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe};
+    use crate::protocol::{ClientCommand, Frame};
 
     #[test]
     fn test_ack() {
@@ -162,7 +167,10 @@ mod tests {
         assert_eq!(frame.command, ClientCommand::Connect);
         assert_eq!(frame.headers["accept-version"], accept_version);
         assert_eq!(frame.headers["host"], host);
-        assert_eq!(frame.headers["heart-beat"], format!("{},{}", client_heartbeat, server_heartbeat));
+        assert_eq!(
+            frame.headers["heart-beat"],
+            format!("{},{}", client_heartbeat, server_heartbeat)
+        );
         assert_eq!(frame.headers[test_header], test_value);
     }
 
@@ -192,10 +200,11 @@ mod tests {
         let test_header = "random";
         let test_value = "54321";
 
-        let frame: Frame<ClientCommand> = Subscribe::new(subscribe_id.to_owned(), destination.to_owned())
-            .receipt(receipt_id.to_owned())
-            .header(test_header.to_owned(), test_value.to_owned())
-            .into();
+        let frame: Frame<ClientCommand> =
+            Subscribe::new(subscribe_id.to_owned(), destination.to_owned())
+                .receipt(receipt_id.to_owned())
+                .header(test_header.to_owned(), test_value.to_owned())
+                .into();
 
         assert_eq!(frame.command, ClientCommand::Subscribe);
         assert_eq!(frame.headers["id"], subscribe_id);
