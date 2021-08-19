@@ -107,6 +107,24 @@ impl Subscribe {
     pub fn new_with_random_id<A: Into<String>>(destination: A) -> Self {
         Self::new(Uuid::new_v4().to_string(), destination.into())
     }
+
+    pub fn ack(self, ack: AckMode) -> Self {
+        self.header(
+            "ack",
+            match ack {
+                AckMode::Auto => "auto",
+                AckMode::Client => "client",
+                AckMode::ClientIndividual => "client-individual",
+            },
+        )
+    }
+}
+
+#[derive(Copy, Clone)]
+pub enum AckMode {
+    Auto,
+    Client,
+    ClientIndividual,
 }
 
 default_frame!(Unsubscribe(id) => receipt (receipt));
