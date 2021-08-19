@@ -86,9 +86,16 @@ impl Interceptor for ReceiptAwaiter {
         if let Some(receipt_id) = frame.headers.get("receipt-id") {
             let mut lock = self.pending_senders.lock().await;
             if let Some(pending_sender) = lock.remove(receipt_id) {
-                pending_sender
+                if pending_sender
                     .send(StompMessage::Frame(frame.clone()))
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    debug!(
+                        "Could not deliver pending message with receipt-id {}",
+                        receipt_id
+                    );
+                }
             };
         }
         Ok(frame)

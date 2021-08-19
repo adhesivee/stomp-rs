@@ -32,7 +32,7 @@ impl Error for ConnectionError {}
 
 pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
-    server_Sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
+    server_sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
     close_sender: Sender<()>,
     is_closed: Arc<Mutex<bool>>,
 }
@@ -51,7 +51,7 @@ impl Connection {
 
         let connection = Self {
             client_sender: sender,
-            server_Sender: server_sender.clone(),
+            server_sender: server_sender.clone(),
             close_sender,
             is_closed,
         };
@@ -85,7 +85,11 @@ impl Connection {
                                     }
                                     Err(e) => {
                                         debug!("Parsing error, closing {:?}", e);
-                                        server_sender.send(Err(ConnectionError::Closing(ClosingReason::ParseError(e))));
+                                        if server_sender.send(Err(ConnectionError::Closing(ClosingReason::ParseError(e))))
+                                            .await
+                                            .is_err() {
+                                            debug!("Could not inform client");
+                                        }
                                         inner_close_sender.send(()).await.unwrap();
                                         closing = true;
                                     }
@@ -94,7 +98,11 @@ impl Connection {
                             Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
                             Err(e) => {
                                 debug!("Connection error, closing {:?}", e);
-                                server_sender.send(Err(ConnectionError::Closing(ClosingReason::ConnectionError(e))));
+                                if server_sender.send(Err(ConnectionError::Closing(ClosingReason::ConnectionError(e))))
+                                    .await
+                                .is_err() {
+                                    debug!("Could not inform client");
+                                }
                                 inner_close_sender.send(()).await.unwrap();
                                 closing = true;
                             }
@@ -136,8 +144,15 @@ impl Connection {
     }
 
     pub async fn close(&self) {
-        self.server_Sender
-            .send(Err(ConnectionError::Closing(ClosingReason::Shutdown)));
+        if self
+            .server_sender
+            .send(Err(ConnectionError::Closing(ClosingReason::Shutdown)))
+            .await
+            .is_err()
+        {
+            debug!("Could not inform client");
+        }
+
         self.close_sender.send(()).await;
     }
 }

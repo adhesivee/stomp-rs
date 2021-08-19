@@ -23,7 +23,7 @@ pub(crate) struct InternalClient {
 
 impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
-        let (sender, mut receiver) = channel(5);
+        let (sender, receiver) = channel(5);
 
         let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> =
             Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
@@ -116,13 +116,24 @@ impl InternalClient {
                                 if let Some(subscription) = frame.headers.get("subscription") {
                                     let lock = subscribers.lock().await;
                                     if let Some(sub_sender) = lock.get(subscription) {
-                                        sub_sender.send(StompMessage::Frame(frame.clone())).await;
+                                        if sub_sender
+                                            .send(StompMessage::Frame(frame.clone()))
+                                            .await
+                                            .is_err()
+                                        {
+                                            debug!(
+                                                "Could not deliver message to subscriber {}",
+                                                subscription
+                                            )
+                                        }
                                     }
                                     drop(lock);
                                 }
 
                                 for interceptor in interceptors.iter() {
-                                    interceptor.after_dispatch(&frame).await;
+                                    if interceptor.after_dispatch(&frame).await.is_err() {
+                                        debug!("Failed intercepting 'after_dispatch'");
+                                    }
                                 }
                             }
                             StompMessage::Ping => last_heartbeat = Instant::now(),
