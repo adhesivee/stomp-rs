@@ -154,3 +154,25 @@ impl Client {
         })
     }
 }
+
+impl Frame<ServerCommand> {
+    pub fn ack(&self) -> Option<Ack> {
+        if let ServerCommand::Message = self.command {
+            if let Some(ack) = self.headers.get("ack") {
+                return Some(Ack::new(ack));
+            }
+        }
+
+        None
+    }
+
+    pub fn nack(&self) -> Option<Nack> {
+        if let ServerCommand::Message = self.command {
+            if let Some(ack) = self.headers.get("ack") {
+                return Some(Nack::new(ack));
+            }
+        }
+
+        None
+    }
+}

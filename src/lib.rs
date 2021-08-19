@@ -34,17 +34,25 @@
 //! ```no_run
 //! use stomp_rs::client::Client;
 //! use stomp_rs::protocol::frame::Subscribe;
-//! use tokio::sync::mpsc::channel;
+//! use tokio::sync::mpsc::{channel, Sender, Receiver};
 //! use std::error::Error;
 //! use stomp_rs::protocol::{Frame, ServerCommand};
 //! use std::future::Future;
+//! use std::sync::Arc;
 //!
-//! async fn subscribe_example(client: &Client)-> Result<(), Box<dyn Error>> {
-//!   let (sender, mut receiver) = channel(16);
+//! async fn subscribe_example(client: Arc<Client>)-> Result<(), Box<dyn Error>> {
+//!   let (sender, mut receiver): (Sender<Frame<ServerCommand>>, Receiver<Frame<ServerCommand>>) = channel(16);
 //!
+//!   let subscriber_client = Arc::clone(&client);
 //!   tokio::spawn(async move {
 //!     match receiver.recv().await {
-//!       Some(frame) => { /* process frame */}
+//!       Some(frame) => {
+//!         /* process frame */
+//!
+//!         // Send ack to server
+//!         subscriber_client.ack(frame.ack().unwrap())
+//!             .await;
+//!       }
 //!       None => { }
 //!     }
 //!   });
