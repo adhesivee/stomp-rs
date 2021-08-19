@@ -7,7 +7,9 @@ license = "MIT"
 repository = "https://github.com/adhesivee/stomp-rs"
 description = "STOMP client"
 keywords = [
-  "stomp"
+  "stomp",
+  "stomp-client",
+  "tokio"
 ]
 
 exclude = [
