@@ -1,5 +1,6 @@
 use crate::client::actor::frame_emitter::frame_emitter_actor;
 use crate::client::actor::receipt_awaiter::receipt_actor;
+use crate::client::actor::subscribers::{SubscriberActor, SubscriberMessage};
 use crate::client::interceptor::{Forwarder, InterceptorMessage};
 use crate::client::{ClientBuilder, ClientError, ServerStompSender, SubscriberId};
 use crate::connection::{Connection, ConnectionError};
@@ -19,7 +20,7 @@ use uuid::Uuid;
 
 pub(crate) struct InternalClient {
     connection: Arc<Connection>,
-    subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
+    subscriber: SubscriberActor,
     interceptors: Arc<Vec<Sender<(Forwarder, InterceptorMessage)>>>,
 }
 
@@ -31,14 +32,16 @@ impl InternalClient {
             Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
         );
 
+        let subscriber = SubscriberActor::new().await;
         let interceptors = Arc::new(vec![
             frame_emitter_actor(Arc::clone(&connection)).await,
             receipt_actor().await,
+            subscriber.interceptor_sender()
         ]);
 
         let client = Self {
             connection,
-            subscribers: Arc::new(Default::default()),
+            subscriber,
             interceptors,
         };
 
@@ -77,7 +80,6 @@ impl InternalClient {
     ) {
         let connection = Arc::clone(&self.connection.clone());
         let interceptors = Arc::clone(&self.interceptors);
-        let subscribers = Arc::clone(&self.subscribers);
 
         tokio::spawn(async move {
             let mut last_heartbeat = Instant::now();
@@ -120,23 +122,6 @@ impl InternalClient {
                                         .unwrap();
                                 }
 
-                                if let Some(subscription) = frame.headers.get("subscription") {
-                                    let lock = subscribers.lock().await;
-                                    if let Some(sub_sender) = lock.get(subscription) {
-                                        if sub_sender
-                                            .send(StompMessage::Frame(frame.clone()))
-                                            .await
-                                            .is_err()
-                                        {
-                                            debug!(
-                                                "Could not deliver message to subscriber {}",
-                                                subscription
-                                            )
-                                        }
-                                    }
-                                    drop(lock);
-                                }
-
                                 match receiver.await.unwrap() {
                                     InterceptorMessage::BeforeServerReceive(frame) => {
                                         let (forwarder, receiver) =
@@ -176,34 +161,15 @@ impl InternalClient {
         self.emit(subscribe.receipt(receipt_id.to_string()).into())
             .await?;
 
-        let sub_connection = Arc::clone(&self.connection);
+        self.subscriber
+            .subscriber_sender()
+            .send(SubscriberMessage::Register {
+                subscriber_id: subscriber_id.to_string(),
+                destination,
+                sender,
+            })
+            .await;
 
-        let (sub_sender, receiver) = channel(5);
-        let mut lock = self.subscribers.lock().await;
-        lock.insert(subscriber_id.to_string(), sub_sender);
-        drop(lock);
-
-        tokio::spawn(async move {
-            let mut sub_recv = receiver;
-
-            while let Some(message) = sub_recv.recv().await {
-                if let StompMessage::Frame(frame) = message {
-                    let destination_header = frame.headers.get("destination");
-
-                    if destination_header.is_some()
-                        && destination_header.unwrap() == &destination
-                        && sender.send(frame).await.is_err()
-                    {
-                        break;
-                    }
-                }
-            }
-
-            sub_connection
-                .emit(Unsubscribe::new(subscriber_id.to_string()))
-                .await
-                .unwrap();
-        });
         Ok(())
     }
 
