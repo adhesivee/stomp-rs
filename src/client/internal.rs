@@ -27,9 +27,6 @@ impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, receiver) = channel(5);
 
-        // let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> =
-        //     Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
-
         let connection = Arc::new(
             Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
         );
