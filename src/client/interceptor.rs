@@ -1,20 +1,47 @@
 use crate::protocol::{ClientCommand, Frame, ServerCommand};
-use async_trait::async_trait;
 use std::error::Error;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::mpsc::{Receiver, Sender};
 
-#[async_trait]
-pub trait Interceptor {
-    async fn before_emit(
-        &self,
-        frame: Frame<ClientCommand>,
-    ) -> Result<Frame<ClientCommand>, Box<dyn Error>>;
+use tokio::sync::oneshot::channel as OneshotChannel;
+use tokio::sync::oneshot::Receiver as OneshotReceiver;
+use tokio::sync::oneshot::Sender as OneshotSender;
 
-    async fn after_emit(&self, frame: &Frame<ClientCommand>) -> Result<(), Box<dyn Error>>;
+pub type ForwardChannel = (
+    Sender<(Forwarder, InterceptorMessage)>,
+    Receiver<(Forwarder, InterceptorMessage)>,
+);
+pub struct Forwarder(
+    Vec<Sender<(Forwarder, InterceptorMessage)>>,
+    tokio::sync::oneshot::Sender<InterceptorMessage>,
+);
 
-    async fn before_dispatch(
-        &self,
-        frame: Frame<ServerCommand>,
-    ) -> Result<Frame<ServerCommand>, Box<dyn Error>>;
+impl Forwarder {
+    pub fn new(
+        forwards: Vec<Sender<(Forwarder, InterceptorMessage)>>,
+    ) -> (Self, OneshotReceiver<InterceptorMessage>) {
+        let (sender, receiver) = OneshotChannel();
+        (Self(forwards, sender), receiver)
+    }
 
-    async fn after_dispatch(&self, frame: &Frame<ServerCommand>) -> Result<(), Box<dyn Error>>;
+    pub async fn proceed(
+        mut self,
+        message: InterceptorMessage,
+    ) -> Result<(), SendError<(Forwarder, InterceptorMessage)>> {
+        if let Some(next) = self.0.pop() {
+            next.send((self, message)).await?;
+        } else {
+            self.1.send(message);
+        }
+
+        Ok(())
+    }
+}
+
+pub enum InterceptorMessage {
+    BeforeClientSend(Frame<ClientCommand>),
+    AfterClientSend(Frame<ClientCommand>),
+
+    BeforeServerReceive(Frame<ServerCommand>),
+    AfterServerReceive(Frame<ServerCommand>),
 }

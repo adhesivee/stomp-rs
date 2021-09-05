@@ -1,6 +1,6 @@
+mod actor;
 mod interceptor;
 mod internal;
-mod receipt_awaiter;
 
 use crate::client::internal::InternalClient;
 use crate::protocol::frame::{Abort, Ack, Begin, Commit, Nack, Send, Subscribe};

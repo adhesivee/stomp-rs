@@ -1,5 +1,6 @@
-use crate::client::interceptor::Interceptor;
-use crate::client::receipt_awaiter::ReceiptAwaiter;
+use crate::client::actor::frame_emitter::frame_emitter_actor;
+use crate::client::actor::receipt_awaiter::receipt_actor;
+use crate::client::interceptor::{Forwarder, InterceptorMessage};
 use crate::client::{ClientBuilder, ClientError, ServerStompSender, SubscriberId};
 use crate::connection::{Connection, ConnectionError};
 use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe, Unsubscribe};
@@ -11,6 +12,7 @@ use std::marker::Send as MarkerSend;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
@@ -18,20 +20,27 @@ use uuid::Uuid;
 pub(crate) struct InternalClient {
     connection: Arc<Connection>,
     subscribers: Arc<Mutex<HashMap<SubscriberId, ServerStompSender>>>,
-    interceptors: Arc<Vec<Box<dyn Interceptor + Sync + MarkerSend>>>,
+    interceptors: Arc<Vec<Sender<(Forwarder, InterceptorMessage)>>>,
 }
 
 impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let (sender, receiver) = channel(5);
 
-        let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> =
-            Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
+        // let interceptors: Arc<Vec<Box<dyn Interceptor + Sync + std::marker::Send>>> =
+        //     Arc::new(vec![Box::new(ReceiptAwaiter::new())]);
+
+        let connection = Arc::new(
+            Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
+        );
+
+        let interceptors = Arc::new(vec![
+            frame_emitter_actor(Arc::clone(&connection)).await,
+            receipt_actor().await,
+        ]);
 
         let client = Self {
-            connection: Arc::new(
-                Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
-            ),
+            connection,
             subscribers: Arc::new(Default::default()),
             interceptors,
         };
@@ -97,9 +106,10 @@ impl InternalClient {
                                 debug!("Frame received: {:?}", frame.clone());
                                 last_heartbeat = Instant::now();
 
-                                for interceptor in interceptors.iter() {
-                                    frame = interceptor.before_dispatch(frame).await.unwrap();
-                                }
+                                let (forwarder, receiver) = Forwarder::new((*interceptors).clone());
+                                forwarder
+                                    .proceed(InterceptorMessage::BeforeServerReceive(frame.clone()))
+                                    .await;
 
                                 if !connected_sender
                                     .as_ref()
@@ -130,9 +140,16 @@ impl InternalClient {
                                     drop(lock);
                                 }
 
-                                for interceptor in interceptors.iter() {
-                                    if interceptor.after_dispatch(&frame).await.is_err() {
-                                        debug!("Failed intercepting 'after_dispatch'");
+                                match receiver.await.unwrap() {
+                                    InterceptorMessage::BeforeServerReceive(frame) => {
+                                        let (forwarder, receiver) =
+                                            Forwarder::new((*interceptors).clone());
+                                        forwarder
+                                            .proceed(InterceptorMessage::AfterServerReceive(frame))
+                                            .await;
+                                    }
+                                    _ => {
+                                        // @TODO
                                     }
                                 }
                             }
@@ -203,16 +220,27 @@ impl InternalClient {
     }
 
     pub(crate) async fn emit(&self, mut frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
-        for interceptor in self.interceptors.iter() {
-            frame = interceptor.before_emit(frame).await?;
+        debug!("Emit frame");
+        let (forwarder, reciever) = Forwarder::new((*self.interceptors).clone());
+        forwarder
+            .proceed(InterceptorMessage::BeforeClientSend(frame))
+            .await;
+
+        match reciever.await? {
+            InterceptorMessage::BeforeClientSend(frame) => {
+                let (forwarder, reciever) = Forwarder::new((*self.interceptors).clone());
+
+                forwarder
+                    .proceed(InterceptorMessage::AfterClientSend(frame))
+                    .await;
+
+                reciever.await?;
+            }
+            _ => {
+                // @TODO: Error describing internal error
+                return Err(Box::new(ClientError::ConnectionError(None)));
+            }
         }
-
-        self.connection.emit(frame.clone()).await?;
-
-        for interceptor in self.interceptors.iter() {
-            interceptor.after_emit(&frame).await?
-        }
-
         Ok(())
     }
 
