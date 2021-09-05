@@ -1,11 +1,9 @@
 use crate::protocol::{ClientCommand, Frame, ServerCommand};
-use std::error::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use tokio::sync::oneshot::channel as OneshotChannel;
 use tokio::sync::oneshot::Receiver as OneshotReceiver;
-use tokio::sync::oneshot::Sender as OneshotSender;
 
 pub type ForwardChannel = (
     Sender<(Forwarder, InterceptorMessage)>,

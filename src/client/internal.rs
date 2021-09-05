@@ -2,19 +2,15 @@ use crate::client::actor::frame_emitter::frame_emitter_actor;
 use crate::client::actor::receipt_awaiter::receipt_actor;
 use crate::client::actor::subscribers::{SubscriberActor, SubscriberMessage};
 use crate::client::interceptor::{Forwarder, InterceptorMessage};
-use crate::client::{ClientBuilder, ClientError, ServerStompSender, SubscriberId};
+use crate::client::{ClientBuilder, ClientError};
 use crate::connection::{Connection, ConnectionError};
-use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe, Unsubscribe};
+use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe};
 use crate::protocol::{ClientCommand, Frame, ServerCommand, StompMessage};
 use log::debug;
-use std::collections::HashMap;
 use std::error::Error;
-use std::marker::Send as MarkerSend;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::Mutex;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -36,7 +32,7 @@ impl InternalClient {
         let interceptors = Arc::new(vec![
             frame_emitter_actor(Arc::clone(&connection)).await,
             receipt_actor().await,
-            subscriber.interceptor_sender()
+            subscriber.interceptor_sender(),
         ]);
 
         let client = Self {
@@ -101,7 +97,7 @@ impl InternalClient {
                 {
                     match message {
                         Some(Ok(message)) => match message {
-                            StompMessage::Frame(mut frame) => {
+                            StompMessage::Frame(frame) => {
                                 debug!("Frame received: {:?}", frame.clone());
                                 last_heartbeat = Instant::now();
 
@@ -129,6 +125,8 @@ impl InternalClient {
                                         forwarder
                                             .proceed(InterceptorMessage::AfterServerReceive(frame))
                                             .await;
+
+                                        receiver.await;
                                     }
                                     _ => {
                                         // @TODO
@@ -182,7 +180,7 @@ impl InternalClient {
         Ok(())
     }
 
-    pub(crate) async fn emit(&self, mut frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn emit(&self, frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {
         debug!("Emit frame");
         let (forwarder, reciever) = Forwarder::new((*self.interceptors).clone());
         forwarder

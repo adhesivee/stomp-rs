@@ -1,9 +1,7 @@
 use crate::client::interceptor::{ForwardChannel, Forwarder, InterceptorMessage};
-use crate::connection::Connection;
-use crate::protocol::{Frame, ServerCommand, StompMessage};
+use crate::protocol::{Frame, ServerCommand};
 use log::debug;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Sender};
 use tokio::time::{sleep, Duration};
 
@@ -83,7 +81,9 @@ async fn process_interceptor(
                 }
             }
 
-            forwarder.proceed(InterceptorMessage::BeforeServerReceive(frame)).await;
+            forwarder
+                .proceed(InterceptorMessage::BeforeServerReceive(frame))
+                .await;
         }
         Some((forwarder, message)) => {
             forwarder.proceed(message).await;
@@ -98,10 +98,16 @@ fn process_subscriber(
 ) {
     if let Some(message) = message {
         match message {
-            SubscriberMessage::Register{ subscriber_id, destination, sender } => {
+            SubscriberMessage::Register {
+                subscriber_id,
+                destination,
+                sender,
+            } => {
                 subscribers.insert(subscriber_id, sender);
             }
-            SubscriberMessage::Unregister(id) => { subscribers.remove(&id); },
+            SubscriberMessage::Unregister(id) => {
+                subscribers.remove(&id);
+            }
         }
     }
 }

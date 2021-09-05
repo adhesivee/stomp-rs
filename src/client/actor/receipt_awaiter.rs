@@ -1,5 +1,5 @@
 use crate::client::interceptor::{ForwardChannel, Forwarder, InterceptorMessage};
-use crate::client::{ReceiptId, ServerStompReceiver, ServerStompSender};
+use crate::client::ReceiptId;
 use crate::protocol::{ClientCommand, Frame};
 use log::debug;
 use std::collections::HashMap;
