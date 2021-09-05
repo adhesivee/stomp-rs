@@ -5,6 +5,7 @@ use log::debug;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Sender};
+use tokio::time::{sleep, Duration};
 
 pub struct SubscriberActor {
     interceptor_sender: Sender<(Forwarder, InterceptorMessage)>,
@@ -25,6 +26,7 @@ impl SubscriberActor {
         let (interceptor_sender, mut interceptor_receiver): ForwardChannel = channel(16);
         let (subscriber_sender, mut subscriber_receiver) = channel(16);
 
+        let inner_subscriber_sender = subscriber_sender.clone();
         tokio::spawn(async move {
             let mut subscribers: HashMap<String, Sender<Frame<ServerCommand>>> = HashMap::new();
 
@@ -36,6 +38,17 @@ impl SubscriberActor {
                     },
                     message = subscriber_receiver.recv() => {
                         process_subscriber(message, &mut subscribers);
+                    }
+                    _ = sleep(Duration::from_millis(250)) => {
+                        let closed_subscribers: Vec<String> = subscribers.iter()
+                            .filter(|entry| entry.1.is_closed())
+                            .map(|closed_entry| closed_entry.0.clone())
+                            .collect();
+
+                        for closed_subscriber in closed_subscribers.into_iter() {
+                            inner_subscriber_sender.send(SubscriberMessage::Unregister(closed_subscriber))
+                                .await;
+                        }
                     }
                 }
             }
