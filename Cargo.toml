@@ -1,6 +1,6 @@
 [package]
 name = "stomp-rs"
-version = "0.0.7"
+version = "0.0.8"
 authors = ["Albert <albert@myndocs.nl>"]
 edition = "2018"
 license = "MIT"
