@@ -247,10 +247,12 @@ impl<T: Command + Clone> FrameParser<T> {
                     } else {
                         let buffer = std::mem::take(&mut self.buffer);
                         let header_line = String::from_utf8(buffer).unwrap();
-                        let mut header = header_line.split(':');
+                        let mut header = header_line.split_once(':')
+                            .unwrap();
+
                         self.current_headers.as_mut().unwrap().insert(
-                            header.next().unwrap().trim().to_string(),
-                            header.next().unwrap().trim().to_string(),
+                            header.0.trim().into(),
+                            header.1.trim().into()
                         );
                     }
                 }
