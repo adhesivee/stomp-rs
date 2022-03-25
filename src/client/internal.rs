@@ -95,7 +95,7 @@ impl InternalClient {
                     match message {
                         Some(Ok(message)) => match message {
                             StompMessage::Frame(frame) => {
-                                debug!("Frame received: {:?}", frame.clone());
+                                debug!("Frame received: {:?}", &frame);
                                 last_heartbeat = Instant::now();
 
                                 for hook in hooks.iter() {

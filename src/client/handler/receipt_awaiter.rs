@@ -6,10 +6,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot::{channel as oneshot_channel, Sender as OneshotSender, Receiver as OneshotReceiver};
 use async_trait::async_trait;
+use tokio::sync::Notify;
 use tokio::time::Duration;
 
 pub struct ReceiptHandler {
-    pending_receipts: Arc<Mutex<HashMap<ReceiptId, (Option<OneshotReceiver<()>>, OneshotSender<()>)>>>,
+    pending_receipts: Arc<Mutex<HashMap<ReceiptId, Arc<Notify>>>>,
 }
 
 impl ReceiptHandler {
@@ -24,12 +25,10 @@ impl ReceiptHandler {
 impl ConnectionHook for ReceiptHandler {
     async fn before_send(&self, frame: &Frame<ClientCommand>) {
         if let Some(receipt) = frame.headers.get("receipt") {
-            let (tx, rx) = oneshot_channel();
-
             {
                 self.pending_receipts.lock()
                     .unwrap()
-                    .insert(receipt.clone(), (Some(rx), tx));
+                    .insert(receipt.clone(), Arc::new(Notify::new()));
             }
         }
     }
@@ -42,31 +41,32 @@ impl ConnectionHook for ReceiptHandler {
                 self.pending_receipts
                     .lock()
                     .unwrap()
-                    .get_mut(receipt)
-                    .unwrap()
-                    .0
-                    .take()
-                    .unwrap()
+                    .get(receipt)
+                    .map(|notify| Arc::clone(notify))
             };
 
-            if let Err(_) = tokio::time::timeout(Duration::from_secs(30), rx).await {
-                self.pending_receipts
-                    .lock()
-                    .unwrap()
-                    .remove(receipt);
+            if let Some(rx) = rx {
+                if let Err(_) = tokio::time::timeout(Duration::from_secs(30), rx.notified()).await {
+                    self.pending_receipts
+                        .lock()
+                        .unwrap()
+                        .remove(receipt);
+                }
             }
         }
     }
 
     async fn before_receive(&self, frame: &Frame<ServerCommand>) {
-        if let Some(receipt_id) = frame.headers.get("receipt-id") {
-            let pender = {
-                self.pending_receipts.lock()
-                    .unwrap()
-                    .remove(receipt_id)
-            };
-            if let Some(pender) = pender {
-                pender.1.send(()).unwrap();
+        if let ServerCommand::Receipt = frame.command {
+            if let Some(receipt_id) = frame.headers.get("receipt-id") {
+                let pender = {
+                    self.pending_receipts.lock()
+                        .unwrap()
+                        .remove(receipt_id)
+                };
+                if let Some(pender) = pender {
+                    pender.notify_one();
+                }
             }
         }
     }

@@ -27,7 +27,7 @@ impl SubscriberHandler {
                 let mut locked_subscribers = subscribers_clone.lock().await;
 
                 let remove_subscribers: Vec<_> = locked_subscribers.iter()
-                    .filter(|sub| !sub.1.is_closed())
+                    .filter(|sub| sub.1.is_closed())
                     .map(|sub| sub.0.clone())
                     .collect();
 
