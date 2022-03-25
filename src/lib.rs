@@ -19,10 +19,10 @@
 //!
 //! ```no_run
 //! use stomp_rs::protocol::frame::Send;
-//! use stomp_rs::client::Client;
+//! use stomp_rs::client::{Client, SendReceipt};
 //! use std::error::Error;;
 //!
-//! async fn send_example(client: &Client) -> Result<(), Box<dyn Error>> {
+//! async fn send_example(client: &Client) -> Result<SendReceipt, Box<dyn Error>> {
 //!   client.send(
 //!       Send::new("/topic/test")
 //!         .body("test-message")

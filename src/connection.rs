@@ -42,7 +42,7 @@ impl Connection {
         mut tcp_stream: TcpStream,
         server_sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
     ) -> Self {
-        let (sender, mut receiver) = channel(5);
+        let (sender, mut receiver) = channel(32);
 
         let (close_sender, mut close_receiver) = channel(1);
         let inner_close_sender = close_sender.clone();

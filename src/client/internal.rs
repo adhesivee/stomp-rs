@@ -1,7 +1,7 @@
 use crate::client::handler::receipt_awaiter::ReceiptHandler;
 use crate::client::handler::subscribers::{SubscriberHandler};
 use crate::client::interceptor::{ConnectionHook};
-use crate::client::{ClientBuilder, ClientError};
+use crate::client::{ClientBuilder, ClientError, SendReceipt};
 use crate::connection::{Connection, ConnectionError};
 use crate::protocol::frame::{Ack, Connect, Nack, Send, Subscribe};
 use crate::protocol::{ClientCommand, Frame, ServerCommand, StompMessage};
@@ -10,30 +10,33 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Notify;
 use tokio::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub(crate) struct InternalClient {
     connection: Arc<Connection>,
     subscriber: SubscriberHandler,
+    receipt: ReceiptHandler,
     hooks: Arc<Vec<Box<dyn ConnectionHook>>>,
 }
 
 impl InternalClient {
     pub(crate) async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
-        let (sender, receiver) = channel(5);
+        let (sender, receiver) = channel(32);
 
         let connection = Arc::new(
             Connection::new(TcpStream::connect(builder.host.clone()).await?, sender).await,
         );
 
         let subscriber = SubscriberHandler::new().await;
-
+        let receipt_handler = ReceiptHandler::new();
         let client = Self {
             connection,
             subscriber: subscriber.clone(),
+            receipt: receipt_handler.clone(),
             hooks: Arc::new(vec![
-                Box::new(ReceiptHandler::new()),
+                Box::new(receipt_handler),
                 Box::new(subscriber),
             ]),
         };
@@ -152,13 +155,18 @@ impl InternalClient {
         Ok(())
     }
 
-    pub(crate) async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
+    pub(crate) async fn send(&self, send: Send) -> Result<SendReceipt, Box<dyn Error>> {
         let receipt_id = Uuid::new_v4();
 
         self.emit(send.receipt(receipt_id.to_string()).into())
             .await?;
 
-        Ok(())
+        Ok(
+            SendReceipt {
+                receipt_id: receipt_id.to_string(),
+                notify: self.receipt.pending_receipt(receipt_id.to_string())
+            }
+        )
     }
 
     pub(crate) async fn emit(&self, frame: Frame<ClientCommand>) -> Result<(), Box<dyn Error>> {

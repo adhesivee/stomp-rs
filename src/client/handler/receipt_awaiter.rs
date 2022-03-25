@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use tokio::sync::Notify;
 use tokio::time::Duration;
 
+#[derive(Clone)]
 pub struct ReceiptHandler {
     pending_receipts: Arc<Mutex<HashMap<ReceiptId, Arc<Notify>>>>,
 }
@@ -19,43 +20,21 @@ impl ReceiptHandler {
             pending_receipts: Arc::new(Mutex::new(Default::default()))
         }
     }
+
+    pub fn pending_receipt(&self, receipt_id: impl Into<String>) -> Arc<Notify> {
+        let notify = Arc::new(Notify::new());
+
+        self.pending_receipts
+            .lock()
+            .unwrap()
+            .insert(receipt_id.into(), Arc::clone(&notify));
+
+        notify
+    }
 }
 
 #[async_trait]
 impl ConnectionHook for ReceiptHandler {
-    async fn before_send(&self, frame: &Frame<ClientCommand>) {
-        if let Some(receipt) = frame.headers.get("receipt") {
-            {
-                self.pending_receipts.lock()
-                    .unwrap()
-                    .insert(receipt.clone(), Arc::new(Notify::new()));
-            }
-        }
-    }
-
-    async fn after_send(&self, frame: &Frame<ClientCommand>) {
-        if let Some(receipt) = frame.headers.get("receipt") {
-            // @TODO: Receipt cleanup
-            debug!("Receipt received");
-            let rx = {
-                self.pending_receipts
-                    .lock()
-                    .unwrap()
-                    .get(receipt)
-                    .map(|notify| Arc::clone(notify))
-            };
-
-            if let Some(rx) = rx {
-                if let Err(_) = tokio::time::timeout(Duration::from_secs(30), rx.notified()).await {
-                    self.pending_receipts
-                        .lock()
-                        .unwrap()
-                        .remove(receipt);
-                }
-            }
-        }
-    }
-
     async fn before_receive(&self, frame: &Frame<ServerCommand>) {
         if let ServerCommand::Receipt = frame.command {
             if let Some(receipt_id) = frame.headers.get("receipt-id") {

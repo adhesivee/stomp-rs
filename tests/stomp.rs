@@ -318,7 +318,7 @@ async fn test_await_receipt() -> Result<(), Box<dyn Error>> {
 
     debug!("Sent message");
     let time = Instant::now();
-    let send = client.send(Send::new("/test/topic")).await?;
+    let send = client.send(Send::new("/test/topic")).await?.notify.notified().await;
 
     debug!("Message send");
     assert!(time.elapsed().as_millis() >= 1000);

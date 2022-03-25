@@ -9,6 +9,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 type ReceiptId = String;
@@ -26,7 +27,7 @@ impl Transaction {
         }
     }
 
-    pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
+    pub async fn send(&self, send: Send) -> Result<SendReceipt, Box<dyn Error>> {
         self.internal_client
             .send(send.header("transaction", self.transaction_id.clone()))
             .await
@@ -104,6 +105,11 @@ impl Display for ClientError {
 
 impl Error for ClientError {}
 
+pub struct SendReceipt {
+    pub receipt_id: String,
+    pub notify: Arc<Notify>,
+}
+
 impl Client {
     pub async fn connect(builder: ClientBuilder) -> Result<Self, Box<dyn Error>> {
         let internal_client = InternalClient::connect(builder).await?;
@@ -121,7 +127,7 @@ impl Client {
         self.internal_client.subscribe(subscribe, sender).await
     }
 
-    pub async fn send(&self, send: Send) -> Result<(), Box<dyn Error>> {
+    pub async fn send(&self, send: Send) -> Result<SendReceipt, Box<dyn Error>> {
         self.internal_client.send(send).await
     }
 
