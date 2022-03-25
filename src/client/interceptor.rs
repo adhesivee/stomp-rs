@@ -4,42 +4,13 @@ use tokio::sync::mpsc::{Receiver, Sender};
 
 use tokio::sync::oneshot::channel as OneshotChannel;
 use tokio::sync::oneshot::Receiver as OneshotReceiver;
+use async_trait::async_trait;
 
-pub type ForwardChannel = (
-    Sender<(Forwarder, InterceptorMessage)>,
-    Receiver<(Forwarder, InterceptorMessage)>,
-);
-pub struct Forwarder(
-    Vec<Sender<(Forwarder, InterceptorMessage)>>,
-    tokio::sync::oneshot::Sender<InterceptorMessage>,
-);
+#[async_trait]
+pub trait ConnectionHook {
+    async fn before_send(&self, frame: &Frame<ClientCommand>);
+    async fn after_send(&self, frame: &Frame<ClientCommand>);
 
-impl Forwarder {
-    pub fn new(
-        forwards: Vec<Sender<(Forwarder, InterceptorMessage)>>,
-    ) -> (Self, OneshotReceiver<InterceptorMessage>) {
-        let (sender, receiver) = OneshotChannel();
-        (Self(forwards, sender), receiver)
-    }
-
-    pub async fn proceed(
-        mut self,
-        message: InterceptorMessage,
-    ) -> Result<(), SendError<(Forwarder, InterceptorMessage)>> {
-        if let Some(next) = self.0.pop() {
-            next.send((self, message)).await?;
-        } else {
-            self.1.send(message);
-        }
-
-        Ok(())
-    }
-}
-
-pub enum InterceptorMessage {
-    BeforeClientSend(Frame<ClientCommand>),
-    AfterClientSend(Frame<ClientCommand>),
-
-    BeforeServerReceive(Frame<ServerCommand>),
-    AfterServerReceive(Frame<ServerCommand>),
+    async fn before_receive(&self, frame: &Frame<ServerCommand>);
+    async fn after_receive(&self, frame: &Frame<ServerCommand>);
 }
