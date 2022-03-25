@@ -70,7 +70,4 @@ impl ConnectionHook for ReceiptHandler {
             }
         }
     }
-
-    async fn after_receive(&self, frame: &Frame<ServerCommand>) {
-    }
 }

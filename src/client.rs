@@ -4,17 +4,14 @@ mod internal;
 
 use crate::client::internal::InternalClient;
 use crate::protocol::frame::{Abort, Ack, Begin, Commit, Nack, Send, Subscribe};
-use crate::protocol::{Frame, ServerCommand, StompMessage};
+use crate::protocol::{Frame, ServerCommand};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 type ReceiptId = String;
-type SubscriberId = String;
-type ServerStompSender = Sender<StompMessage<ServerCommand>>;
-type ServerStompReceiver = Receiver<StompMessage<ServerCommand>>;
 
 pub struct Transaction {
     transaction_id: String,

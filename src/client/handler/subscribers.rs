@@ -1,11 +1,11 @@
 use crate::client::interceptor::{ConnectionHook};
-use crate::protocol::{ClientCommand, Frame, ServerCommand};
+use crate::protocol::{Frame, ServerCommand};
 use log::debug;
 use std::collections::HashMap;
-use std::sync::{Arc};
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::time::{sleep, Duration};
+use tokio::sync::mpsc::Sender;
+use tokio::time::Duration;
 use async_trait::async_trait;
 
 type Subscribers = Arc<Mutex<HashMap<String, Sender<Frame<ServerCommand>>>>>;
@@ -44,28 +44,17 @@ impl SubscriberHandler {
     pub async fn register(
         &self,
         subscriber_id: impl Into<String>,
-        destination: impl Into<String>,
+        _destination: impl Into<String>,
         sender: Sender<Frame<ServerCommand>>
     ) {
         self.subscribers.lock()
             .await
             .insert(subscriber_id.into(), sender);
     }
-
-    pub async fn unregister(&self, subscriber_id: &str) {
-        self.subscribers
-            .lock()
-            .await
-            .remove(subscriber_id);
-    }
 }
 
 #[async_trait]
 impl ConnectionHook for SubscriberHandler {
-    async fn before_send(&self, frame: &Frame<ClientCommand>) {}
-
-    async fn after_send(&self, frame: &Frame<ClientCommand>) {}
-
     async fn before_receive(&self, frame: &Frame<ServerCommand>) {
         if let Some(subscription) = frame.headers.get("subscription") {
             let lock_subscribers = self.subscribers.lock().await;
@@ -76,6 +65,4 @@ impl ConnectionHook for SubscriberHandler {
             }
         }
     }
-
-    async fn after_receive(&self, frame: &Frame<ServerCommand>) {}
 }

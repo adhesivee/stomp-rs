@@ -16,7 +16,7 @@ use uuid::Uuid;
 pub(crate) struct InternalClient {
     connection: Arc<Connection>,
     subscriber: SubscriberHandler,
-    hooks: Arc<Vec<Box<dyn ConnectionHook + Sync + std::marker::Send>>>,
+    hooks: Arc<Vec<Box<dyn ConnectionHook>>>,
 }
 
 impl InternalClient {
