@@ -4,6 +4,7 @@ use log::debug;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ErrorKind};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::error::SendError;
@@ -34,7 +35,7 @@ pub struct Connection {
     client_sender: Sender<StompMessage<ClientCommand>>,
     server_sender: Sender<Result<StompMessage<ServerCommand>, ConnectionError>>,
     close_sender: Sender<()>,
-    is_closed: Arc<Mutex<bool>>,
+    is_closed: Arc<AtomicBool>
 }
 
 impl Connection {
@@ -46,7 +47,7 @@ impl Connection {
 
         let (close_sender, mut close_receiver) = channel(1);
         let inner_close_sender = close_sender.clone();
-        let is_closed = Arc::new(Mutex::new(false));
+        let is_closed = Arc::new(AtomicBool::new(false));
         let inner_is_closed = Arc::clone(&is_closed);
 
         let connection = Self {
@@ -116,9 +117,7 @@ impl Connection {
 
                         receiver.close();
 
-                        let mut guard = inner_is_closed.lock().await;
-                        *guard = true;
-                        break;
+                        inner_is_closed.swap(true, Ordering::Relaxed);
                     }
                 };
             }
@@ -127,8 +126,8 @@ impl Connection {
         connection
     }
 
-    pub async fn is_closed(&self) -> bool {
-        *self.is_closed.lock().await
+    pub fn is_closed(&self) -> bool {
+        self.is_closed.load(Ordering::Relaxed)
     }
     pub async fn emit<T: Into<Frame<ClientCommand>>>(
         &self,

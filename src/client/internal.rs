@@ -83,7 +83,7 @@ impl InternalClient {
             let mut connected_sender = Some(connected_sender);
 
             loop {
-                if connection.is_closed().await {
+                if connection.is_closed() {
                     debug!("Connection closed, closing client");
                     receiver.close();
                 }

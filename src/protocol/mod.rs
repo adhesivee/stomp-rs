@@ -110,18 +110,18 @@ where
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buffer = vec![];
 
-        buffer.extend_from_slice(self.command.into().as_bytes());
+        buffer.extend(self.command.into().as_bytes());
         buffer.push(BNF_LF);
 
         self.headers.iter().for_each(|entry| {
-            buffer.extend_from_slice(entry.0.as_bytes());
-            buffer.extend_from_slice(":".as_bytes());
-            buffer.extend_from_slice(entry.1.as_bytes());
+            buffer.extend(entry.0.as_bytes());
+            buffer.extend(b":");
+            buffer.extend(entry.1.as_bytes());
             buffer.push(BNF_LF)
         });
 
         buffer.push(BNF_LF);
-        buffer.extend_from_slice(self.body.as_bytes());
+        buffer.extend(self.body.as_bytes());
         buffer.push(BNF_NULL);
 
         buffer
